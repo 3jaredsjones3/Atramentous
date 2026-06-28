@@ -1,0 +1,82 @@
+# Atramentous nightly sweep — the propose-never-commit harness.
+#
+# Runs the deterministic entropy linter every night, writes a dated digest,
+# and opens a PR if anything drifted. The PR IS the human gate: nothing reaches
+# the main branch without a person merging it. This is what makes unattended
+# memory maintenance safe for code.
+#
+# Drop this at .github/workflows/atra-sweep.yml in your repo.
+name: atra-sweep
+
+on:
+  schedule:
+    - cron: "0 9 * * *"        # 09:00 UTC ≈ 02:00 US Pacific. Adjust to taste.
+  workflow_dispatch: {}         # also runnable on demand from the Actions tab
+
+permissions:
+  contents: write               # to push the proposal branch
+  pull-requests: write          # to open the gate PR
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # full history — the linter needs git blame for node age
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run deterministic lint tier
+        id: lint
+        run: |
+          mkdir -p docs/atramentous/sweeps
+          DATE=$(date -u +%Y-%m-%d)
+          python3 .atramentous/atra_lint.py . --since-last \
+            --state docs/atramentous/sweeps/.state.json \
+            > "docs/atramentous/sweeps/${DATE}.md" || true
+          cp "docs/atramentous/sweeps/${DATE}.md" docs/atramentous/sweeps/latest.md
+          echo "date=${DATE}" >> "$GITHUB_OUTPUT"
+          # surface the headline in the Actions log
+          head -2 "docs/atramentous/sweeps/${DATE}.md"
+          # findings present? (count > 0 in the entropy line)
+          if grep -qE '^entropy: [1-9]' "docs/atramentous/sweeps/${DATE}.md"; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # OPTIONAL judgment tier — only the safe, deterministic repairs.
+      # An LLM pass (Claude Code headless, Codex CLI, etc.) goes here if you want
+      # it to draft stale-rationale reviews and safe link repoints onto this same
+      # branch. It must be configured to PROPOSE only — never to promote a
+      # scaffold, rewrite a guardrail, or edit live code. Left commented so the
+      # workflow is fully functional and safe with zero secrets out of the box.
+      #
+      # - name: Judgment pass (propose-only)
+      #   env:
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      #   run: npx -y @anthropic-ai/claude-code -p "Use atra-sweep. Read
+      #        docs/atramentous/sweeps/latest.md. Stage ONLY safe repairs
+      #        (repoint dead links, close register orphans). Propose everything
+      #        consequential in the digest. Do not touch live code."
+
+      - name: Open the gate (PR with the digest + any safe proposals)
+        if: steps.lint.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DATE=${{ steps.lint.outputs.date }}
+          BRANCH="atra/sweep-${DATE}"
+          git config user.name  "atra-sweep"
+          git config user.email "atra-sweep@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add docs/atramentous/sweeps
+          git commit -m "atra-sweep ${DATE}: entropy digest + safe proposals"
+          git push -f origin "$BRANCH"
+          gh pr create --title "atra-sweep ${DATE}" \
+            --body "Automated memory-entropy sweep. Review the digest in this PR. Safe repairs are committed; consequential items are listed as proposals for atra-reconcile under your review. Nothing here touches the main branch until you merge." \
+            --base "${{ github.ref_name }}" --head "$BRANCH" || \
+          gh pr edit "$BRANCH" --body "updated sweep ${DATE}"
