@@ -6,7 +6,8 @@ No LLM. grep + git only. Read-only. This is the "lint" tier of atra-sweep:
 it computes the drift it can prove and leaves judgment calls to the caller.
 
 What it detects:
-  - unresolved related-links     ([[X]] in related context with no target)
+  - unresolved related-links     ([[X]] in related context with no target;
+                                  includes dead [[store:<slug>]] pointers)
   - fulfilled-future             (future: [[X]] whose target now exists → promote)
   - aging-future                 (future: [[X]] unbuilt while its neighborhood
                                   moved > future-age-commits past it)
@@ -14,6 +15,12 @@ What it detects:
                                   took > age-commits)
   - unanswered DECISION nodes    (DECISION bypassed by > decision-commits of work)
   - register orphans             (register ID never referenced by any [[link]])
+  - over-density                 (a file or function carrying more ASSISTIVE
+                                  annotation than its budget → promote lowest-value
+                                  nodes to the external store)
+  - should-externalize           (a heavy inline ASSISTIVE node whose region has
+                                  grown > externalize-threshold neighborhood-commits
+                                  → move its payload to the store, leave a pointer)
 
 Staleness is measured in DEVELOPMENT, not calendar time: the unit is commits in
 the plan's neighborhood since it was written, not days. A plan is stale when the
@@ -21,14 +28,25 @@ trunk grew past the branch point, however long that took. (Tokens/sessions are a
 truer unit but live in the agent runtime, not git; commits are the best proxy git
 exposes.)
 
+The density and growth tiers govern ASSISTIVE memory only. A GUARDRAIL — a node
+whose status is SAFETY or SPINE, or that carries a `do-not:` field — is never
+budget-counted and never externalized: safety memory stays inline and always
+visible regardless of density or growth.
+
+Every magnitude below is a CLI flag whose default is a *reasoned default — tune
+with use, not empirically derived* (see --help).
+
 What it deliberately never flags:
   - forward-links in a still neighborhood (no growth = no signal, not "fine")
   - old-but-true memory (age != staleness; only contradiction is drift)
+  - memory inside small / young / dormant regions (the inline tier is correct there)
 
 Usage:
   atra_lint.py [path] [--json] [--age-commits 25] [--decision-commits 20]
-               [--future-age-commits 40] [--since-last]
-               [--state docs/atramentous/sweeps/.state.json]
+               [--future-age-commits 40] [--max-nodes-per-function 1]
+               [--node-line-ratio 25] [--density-floor 1]
+               [--externalize-threshold 40] [--heavy-node-lines 4]
+               [--since-last] [--state docs/atramentous/sweeps/.state.json]
   atra_lint.py --selftest
 """
 from __future__ import annotations
@@ -46,6 +64,15 @@ FIELD = re.compile(r"^\s*(?://|#|--|<!--)?\s*(why|related|future|gate|promote-wh
                    r"risk|do-not|status)\s*:\s*(.*)$", re.I)
 # link prefixes that imply a concrete artifact (so an unresolved one is higher signal)
 CONCRETE_PREFIX = re.compile(r"^\s*(TEST|ADR-|M\d|SPINE|SAFETY|SCAFFOLD)\b")
+# externalization pointer: `[[store:<slug>]]` points at docs/atramentous/store/<slug>.md
+STORE_LINK = re.compile(r"^\s*store:(.+)$", re.I)
+# function-header heuristic (keyword forms across langs). A node is attributed to
+# the function header that immediately FOLLOWS it (annotations sit above their
+# code); nodes below the last header attach to it. Deliberately a proxy — it feeds
+# a review prompt, not a verdict, exactly like neighborhood_of(). Brace-only
+# headers (C/Java `int f(){`) are intentionally NOT matched, to avoid colliding
+# with control-flow (`if (...) {`); those files are governed by the file ratio.
+FUNC_DEF = re.compile(r"^\s*(?:[\w@$<>\[\].]+\s+)*(?:def|fn|fun|func|function)\b")
 
 CODE_EXT = {".py", ".kt", ".kts", ".java", ".c", ".cc", ".cpp", ".h", ".hpp",
             ".rs", ".go", ".ts", ".tsx", ".js", ".jsx", ".swift", ".rb", ".cs",
@@ -56,8 +83,10 @@ SKIP_DIRS = {".git", "node_modules", "build", "dist", "target", ".venv",
 
 def sh(args, cwd):
     try:
+        # decode as utf-8 explicitly: the default locale codec (cp1252 on Windows)
+        # chokes on non-ASCII in git output / annotations (e.g. em-dashes).
         return subprocess.run(args, cwd=cwd, capture_output=True, text=True,
-                              timeout=60).stdout
+                              encoding="utf-8", errors="replace", timeout=60).stdout
     except Exception:
         return ""
 
@@ -133,7 +162,7 @@ def register_ids(reg_path):
 
 
 def build_index(root):
-    """resolvable link targets: file stems, md headings, register ids."""
+    """resolvable link targets: file stems, md headings, register ids, store slugs."""
     targets = set()
     for f in walk_files(root):
         targets.add(f.stem.lower())
@@ -145,6 +174,13 @@ def build_index(root):
     for rid in register_ids(find_register(root)):
         targets.add(rid.lower())
         targets.add(rid.split()[0].lower())
+    # externalized-memory store: each note is one file, its stem is its slug/id.
+    # `[[store:<slug>]]` resolves iff docs/atramentous/store/<slug>.md exists, so a
+    # pointer to a missing note is a dead link like any other.
+    store_dir = Path(root) / "docs" / "atramentous" / "store"
+    if store_dir.is_dir():
+        for sf in store_dir.glob("*.md"):
+            targets.add(f"store:{sf.stem.lower()}")
     return targets
 
 
@@ -157,7 +193,153 @@ def resolves(name, targets):
     return head in targets or any(n in t or t in n for t in targets if len(t) > 4 and t == n)
 
 
-def scan(root, age_commits, decision_commits, future_age_commits):
+def block_label(status, block_lines):
+    """short human handle for a heavy node: status + its first link, else status."""
+    for ln in block_lines:
+        m = LINK.search(ln)
+        if m:
+            return f"{status} [[{m.group(1).strip()}]]"
+    return status
+
+
+def breadcrumb_label(text):
+    m = LINK.search(text)
+    if m:
+        return f"[[{m.group(1).strip()}]]"
+    return ("atra: " + text.strip())[:48]
+
+
+def extract_nodes(lines):
+    """Re-parse a file into discrete memory nodes for the density/growth tiers.
+    Read-only and independent of the aging loop, so it adds detection without
+    perturbing any existing finding. Each node records whether it is a GUARDRAIL
+    (status SAFETY/SPINE, or carries a do-not: field) — guardrails are never
+    budget-counted and never externalized."""
+    nodes, i, n = [], 0, len(lines)
+    while i < n:
+        line = lines[i]
+        sm = STATUS.search(line)
+        if sm:
+            status = sm.group(1).upper()
+            fields, j = set(), i + 1
+            while j < n:
+                lj = lines[j]
+                fm = FIELD.match(lj)
+                if fm:
+                    fields.add(fm.group(1).lower()); j += 1; continue
+                if lj.strip() == "":
+                    break
+                if lj.lstrip().startswith(("//", "#", "--", "*", "<!--")):
+                    j += 1; continue
+                break
+            guard = status in ("SAFETY", "SPINE") or "do-not" in fields
+            nodes.append(dict(start=i + 1, kind="block", status=status, fields=fields,
+                              guard=guard, pointer=False, nlines=j - i,
+                              label=block_label(status, lines[i:j])))
+            i = j; continue
+        bm = BREADCRUMB.search(line)
+        if bm:
+            pointer = "[[store:" in line.lower()
+            nodes.append(dict(start=i + 1, kind="breadcrumb", status=None, fields=set(),
+                              guard=False, pointer=pointer, nlines=1,
+                              label=breadcrumb_label(bm.group(1))))
+        i += 1
+    return nodes
+
+
+def value_score(nd):
+    """Deterministic 'keep-inline value' — HIGHER means more valuable, so the
+    LOWEST-scoring assistive nodes are promoted to the store first. Active roadmap
+    and open lifecycle outrank a bare related-link breadcrumb."""
+    s = 0
+    f = nd["fields"]
+    if "future" in f or "gate" in f:
+        s += 4
+    if nd["status"] in ("SCAFFOLD", "EXPERIMENT", "DECISION"):
+        s += 3
+    if "risk" in f:
+        s += 2
+    if "why" in f:
+        s += 1
+    return s
+
+
+def promote_suggestion(candidates, over):
+    """Name the lowest-value externalizable nodes to move. Deterministic order:
+    value asc, then heaviest (most lines) first for biggest density relief, then
+    line order. Guardrails and existing pointers are excluded by the caller."""
+    ranked = sorted(candidates, key=lambda nd: (value_score(nd), -nd["nlines"], nd["start"]))
+    if not ranked:
+        return "consolidate pointers (no externalizable node left — payload is already guardrails/pointers)"
+    head = ranked[0]
+    extra = f" (+{over - 1} more)" if over > 1 else ""
+    return f"promote lowest-value to store: {head['label']} @L{head['start']}{extra}"
+
+
+def density_findings(rel, lines, nodes, max_per_func, node_line_ratio, density_floor):
+    """over-density: a function or file carrying more ASSISTIVE annotation than its
+    budget. Guardrails are never counted (the density rule governs assistive memory
+    only); pointers ARE counted (a wall of summons is the noise the cap kills)."""
+    out = []
+    assistive = [nd for nd in nodes if not nd["guard"]]
+
+    # --- per-function budget (node COUNT) ---
+    headers = [i + 1 for i, l in enumerate(lines) if FUNC_DEF.match(l)]
+    if headers:
+        buckets = {h: [] for h in headers}
+        for nd in assistive:
+            # attribute to the header immediately at/after the node; else the last
+            following = [h for h in headers if h >= nd["start"]]
+            buckets[following[0] if following else headers[-1]].append(nd)
+        for h in headers:
+            here = buckets[h]
+            if len(here) > max_per_func:
+                over = len(here) - max_per_func
+                cand = [nd for nd in here if not nd["pointer"]]
+                out.append(dict(kind="over-density", sev="low", loc=f"{rel}:{h}",
+                                detail=f"{len(here)} assistive nodes on one function "
+                                       f"(> {max_per_func}) — {promote_suggestion(cand, over)}"))
+
+    # --- file budget (node-LINE : code-LINE ratio) ---
+    nonblank = sum(1 for l in lines if l.strip())
+    mem_all = sum(nd["nlines"] for nd in nodes)
+    counted = sum(nd["nlines"] for nd in assistive)
+    code_lines = max(0, nonblank - mem_all)
+    # the 1:N ratio is only meaningful once a file has at least N code lines; below
+    # that, density is governed by the per-function cap alone (keeps tiny scaffolds
+    # from tripping a ratio that can't yet say anything).
+    if code_lines >= node_line_ratio:
+        budget = max(density_floor, code_lines // node_line_ratio)
+        if counted > budget:
+            over = counted - budget
+            cand = [nd for nd in assistive if not nd["pointer"]]
+            out.append(dict(kind="over-density", sev="low", loc=rel,
+                            detail=f"{counted} assistive node-lines vs {code_lines} code "
+                                   f"(budget {budget}) — {promote_suggestion(cand, over)}"))
+    return out
+
+
+def externalize_findings(rel, hood, nodes, meta, root, threshold, heavy_lines):
+    """should-externalize: a HEAVY inline assistive node whose region has grown past
+    --externalize-threshold neighborhood-commits → move its payload to the store and
+    leave a pointer. Small/young/dormant regions keep memory inline (no growth, no
+    flag). Guardrails are never externalized regardless of growth."""
+    out = []
+    for nd in nodes:
+        if nd["kind"] != "block" or nd["guard"] or nd["nlines"] < heavy_lines:
+            continue
+        _, h = meta.get(nd["start"], (None, None))
+        n = commits_since(h, hood, root)
+        if n > threshold:
+            out.append(dict(kind="should-externalize", sev="low", loc=f"{rel}:{nd['start']}",
+                            detail=f"{nd['label']} heavy inline while {hood}/ grew {n} commits "
+                                   f"(> {threshold}) — move payload to store, leave a pointer"))
+    return out
+
+
+def scan(root, age_commits, decision_commits, future_age_commits,
+         max_per_func=1, node_line_ratio=25, density_floor=1,
+         externalize_threshold=40, heavy_node_lines=4):
     findings = []
     git = is_git(root)
     targets = build_index(root)
@@ -228,6 +410,14 @@ def scan(root, age_commits, decision_commits, future_age_commits):
                                              detail=f"{block_status} unmoved while {hood}/ took {n} commits (> {thr})"))
                 in_block, block_status = False, None
 
+        # density + growth tiers (additive; independent of the aging loop above)
+        nodes = extract_nodes(lines)
+        findings += density_findings(rel, lines, nodes, max_per_func,
+                                     node_line_ratio, density_floor)
+        if git:
+            findings += externalize_findings(rel, hood, nodes, meta, root,
+                                             externalize_threshold, heavy_node_lines)
+
     for rid in reg_ids:
         head = rid.split()[0].lower()
         if rid.lower() not in referenced and head not in referenced:
@@ -285,6 +475,23 @@ def main(argv=None):
     ap.add_argument("--age-commits", type=int, default=25)
     ap.add_argument("--decision-commits", type=int, default=20)
     ap.add_argument("--future-age-commits", type=int, default=40)
+    # density + externalization budgets. Every magnitude below is a reasoned
+    # default — tune with use, not empirically derived.
+    ap.add_argument("--max-nodes-per-function", type=int, default=1,
+                    help="max assistive memory nodes on one function before over-density "
+                         "(reasoned default 1; guardrails never counted)")
+    ap.add_argument("--node-line-ratio", type=int, default=25,
+                    help="allowed code lines per assistive node-line; file over-density "
+                         "fires above this (reasoned default 25 ~ 1 node-line / 25 code)")
+    ap.add_argument("--density-floor", type=int, default=1,
+                    help="free assistive node-lines every file gets before the ratio "
+                         "applies (reasoned default 1)")
+    ap.add_argument("--externalize-threshold", type=int, default=40,
+                    help="neighborhood-commits of growth past a heavy inline node before "
+                         "should-externalize fires (reasoned default 40, deliberately high)")
+    ap.add_argument("--heavy-node-lines", type=int, default=4,
+                    help="min lines for a block to count as 'heavy' / externalizable "
+                         "(reasoned default 4)")
     ap.add_argument("--since-last", action="store_true")
     ap.add_argument("--state", default="docs/atramentous/sweeps/.state.json")
     ap.add_argument("--selftest", action="store_true")
@@ -293,7 +500,10 @@ def main(argv=None):
     if a.selftest:
         return selftest()
 
-    findings = scan(a.path, a.age_commits, a.decision_commits, a.future_age_commits)
+    findings = scan(a.path, a.age_commits, a.decision_commits, a.future_age_commits,
+                    max_per_func=a.max_nodes_per_function, node_line_ratio=a.node_line_ratio,
+                    density_floor=a.density_floor, externalize_threshold=a.externalize_threshold,
+                    heavy_node_lines=a.heavy_node_lines)
     score = entropy_score(findings)
     trend = ""
     if a.since_last:
@@ -330,13 +540,69 @@ def selftest():
             "// related: [[Nonexistent System]]\n"    # dead related-link
             "fun x() {}\n")
         (root / "zoneA" / "compute.kt").write_text("fun c() {}\n")  # makes [[compute]] resolve
+        # a GUARDRAIL inside the SAME grown neighborhood — must NEVER be externalized
+        (root / "zoneA" / "safety.kt").write_text(
+            "// ATRAMENTOUS SAFETY\n"
+            "// why: atomic save protects against data loss on crash\n"
+            "// do-not: write in place; always temp-then-rename\n"
+            "// invariant: fsync the temp file before the rename\n"
+            "fun atomicSave() {}\n")
         # zone B: dormant — a forward-link that nothing ever grows past
         (root / "zoneB").mkdir()
         (root / "zoneB" / "b.kt").write_text(
             "// ATRAMENTOUS SCAFFOLD\n// why: distant\n// future: [[Far Off Thing]]\nfun y() {}\n")
+        # a dormant zone with a HEAVY assistive node — heaviness alone must NOT
+        # externalize; only growth does (this zone never grows)
+        (root / "zoneDorm").mkdir()
+        (root / "zoneDorm" / "dh.kt").write_text(
+            "// ATRAMENTOUS SCAFFOLD\n"
+            "// why: a heavy rationale that is a fine externalization candidate by size\n"
+            "// risk: but its region is dormant, so it must stay inline\n"
+            "// future: [[Some Day Thing]]\n"
+            "fun dorm() {}\n")
         (root / "docs" / "atramentous").mkdir(parents=True)
         (root / "docs" / "atramentous" / "register.md").write_text(
             "| ID | status |\n|---|---|\n| GhostRow | SCAFFOLD |\n")
+
+        # --- density-tier fixtures (no growth; over-density is budget, not age) ---
+        (root / "anchor.kt").write_text("fun anchor() {}\n")  # resolves [[anchor]]
+        # per-function over-density: two assistive nodes on one function (> max 1)
+        (root / "zoneFunc").mkdir()
+        (root / "zoneFunc" / "f.kt").write_text(
+            "// atra: [[anchor]] one\n"
+            "// atra: [[anchor]] two\n"
+            "fun densely() {}\n"
+            "fun sparse() {}\n"
+            "// atra: [[anchor]] solo\n")
+        # file over-density: 30 breadcrumbs (1/function) over 30 code lines, budget 1
+        (root / "zoneDense").mkdir()
+        (root / "zoneDense" / "d.kt").write_text(
+            "".join(f"// atra: [[anchor]] n{k}\nfun c{k}() {{}}\n" for k in range(30)))
+        # at-budget: 30 code lines, a single breadcrumb -> within ratio, no flag
+        (root / "zoneOK").mkdir()
+        (root / "zoneOK" / "o.kt").write_text(
+            "// atra: [[anchor]] the one note this file needs\n"
+            + "".join(f"fun ok{k}() {{}}\n" for k in range(30)))
+        # guardrail must NEVER be budget-counted: dense SAFETY block, no flag
+        (root / "zoneGuard").mkdir()
+        (root / "zoneGuard" / "g.kt").write_text(
+            "// ATRAMENTOUS SAFETY\n"
+            "// why: never lose user data\n"
+            "// do-not: skip the atomic rename\n"
+            "// invariant: temp fsynced before rename\n"
+            "fun save() {}\n")
+        # store-pointer resolution: existing slug resolves, ghost slug is a dead link
+        (root / "docs" / "atramentous" / "store").mkdir()
+        (root / "docs" / "atramentous" / "store" / "existing-note.md").write_text(
+            "---\nid: existing-note\ntitle: A real store note\nstatus: REFERENCE\n---\n\n"
+            "why: exists so a [[store:existing-note]] pointer resolves in the selftest.\n")
+        (root / "zonePtr").mkdir()
+        (root / "zonePtr" / "p.kt").write_text(
+            "// atra: see [[store:existing-note]] — losing this breaks the parity check\n"
+            "fun a() {}\n"
+            "// atra: see [[store:ghost-note]] — points at no note\n"
+            "fun b() {}\n")
+
         git("add", "-A"); git("commit", "-qm", "seed")
 
         # development moves ONLY in zoneA — 6 commits grow past its branch point
@@ -344,8 +610,11 @@ def selftest():
             (root / "zoneA" / f"grow{k}.kt").write_text(f"fun g{k}() {{}}\n")
             git("add", "-A"); git("commit", "-qm", f"grow {k}")
 
-        # thresholds in COMMITS: aging fires at >3 neighborhood commits
-        f = scan(str(root), age_commits=3, decision_commits=3, future_age_commits=3)
+        # thresholds in COMMITS: aging fires at >3 neighborhood commits; the
+        # externalize dial is set low (>3) so the grown zone trips it.
+        f = scan(str(root), age_commits=3, decision_commits=3, future_age_commits=3,
+                 max_per_func=1, node_line_ratio=25, density_floor=1,
+                 externalize_threshold=3, heavy_node_lines=4)
         kinds = {x["kind"] for x in f}
         dead = [x for x in f if x["kind"] == "unresolved-link"]
         assert any("Nonexistent System" in x["detail"] for x in dead), "missed dead related-link"
@@ -356,8 +625,35 @@ def selftest():
         assert any(x["kind"] == "aging-node" and "zoneA" in x["loc"] for x in f), "missed aging-node in grown zone"
         # zoneB never grew -> NO aging signal there (no growth = no signal)
         assert not any("zoneB" in x.get("loc", "") for x in f), "wrongly flagged a plan in a dormant neighborhood"
-        print("selftest ok:", sorted(kinds))
-        return 0
+
+        # --- Stage 2: over-density (budget) ---
+        od = [x for x in f if x["kind"] == "over-density"]
+        # per-function: two nodes on one function flags
+        assert any("zoneFunc" in x["loc"] for x in od), "missed per-function over-density"
+        # file-level: dense file flags at file granularity (loc == file, no :line)
+        assert any(x["loc"] == os.path.join("zoneDense", "d.kt") for x in od), "missed file over-density"
+        # at-budget file does NOT flag
+        assert not any("zoneOK" in x["loc"] for x in od), "false over-density on at-budget file"
+        # guardrails are NEVER budget-counted
+        assert not any("zoneGuard" in x["loc"] for x in od), "wrongly counted a guardrail toward density"
+        # promotion suggestion is emitted, deterministically
+        assert all("promote lowest-value" in x["detail"] or "consolidate" in x["detail"]
+                   for x in od), "over-density missing promotion suggestion"
+        # --- store-pointer resolution ---
+        assert any(x["kind"] == "unresolved-link" and "ghost-note" in x["detail"] for x in f), \
+            "missed dead store pointer"
+        assert not any(x["kind"] == "unresolved-link" and "existing-note" in x["detail"] for x in f), \
+            "wrongly flagged a valid store pointer"
+
+        # --- Stage 3: should-externalize (growth dial) ---
+        se = [x for x in f if x["kind"] == "should-externalize"]
+        # zoneA grew past its heavy node -> externalize suggested
+        assert any("zoneA" in x["loc"] and "a.kt" in x["loc"] for x in se), "missed should-externalize in grown zone"
+        # dormant zoneDorm heavy-but-still node -> never externalized
+        assert not any("zoneDorm" in x["loc"] for x in se), "wrongly externalized a dormant heavy node"
+        # a guardrail in the grown zone is NEVER externalized
+        assert not any("safety" in x["loc"].lower() for x in se), "wrongly externalized a guardrail"
+
         print("selftest ok:", sorted(kinds))
         return 0
 

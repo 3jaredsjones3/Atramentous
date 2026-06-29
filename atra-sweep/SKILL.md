@@ -76,6 +76,31 @@ Detected drift:
   provably fired.
 - **unanswered DECISION** — a DECISION bypassed by more than `--decision-commits`
   (default 20) of work piling on top of the unmade decision — the dangerous case.
+- **over-density** — a file or a single function carrying more *assistive*
+  annotation than its budget: more than `--max-nodes-per-function` (default 1)
+  nodes on one function, or assistive node-lines exceeding the
+  `--node-line-ratio` (default 25 code-lines per node-line, with a
+  `--density-floor` of 1 free node-line and the ratio applied only once a file
+  has ≥ N code lines). The finding names the deterministic *lowest-value* node to
+  promote to the store. Pointers count; guardrails never do.
+- **should-externalize** — a *heavy* inline assistive block (≥ `--heavy-node-lines`,
+  default 4) whose neighborhood has grown past `--externalize-threshold`
+  (default 40 commits, deliberately high). The rationale earned its inline slot
+  when the region was small; now it taxes every passer-by → move the payload to
+  `docs/atramentous/store/<slug>.md` and leave a `[[store:<slug>]]` pointer.
+  Small / young / dormant regions are never flagged.
+
+**Guardrails are exempt from both density findings.** A node whose status is
+`SAFETY` or `SPINE`, or that carries a `do-not:` field, is a guardrail: it is
+never budget-counted, never externalized, never suppressed. The density and
+growth tiers govern *assistive* memory only — safety memory stays inline and
+always-visible regardless of how dense or how grown the region is. A dead
+`[[store:<slug>]]` pointer (no note at that slug) surfaces as an ordinary
+`unresolved-link`.
+
+Every magnitude above is a CLI flag whose default is a **reasoned default — tune
+with use, not empirically derived**, never a hardcoded conviction (see
+`atra_lint.py --help`).
 
 **Never flagged as drift** (the line between entropy and the roadmap):
 

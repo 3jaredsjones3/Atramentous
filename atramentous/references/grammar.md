@@ -118,6 +118,67 @@ node:
 Inline annotations are distributed memory; the register is the index over them.
 `atra-reconcile` keeps them in sync; `atra-map` reads from both.
 
+## The externalized tier (the store)
+
+Inline memory is the fast tier: greppable, always-visible, read by every agent
+that passes the code. But heavy rationale read by *few* agents *rarely* taxes
+*every* agent that scrolls past it. As a region matures, that imbalance grows.
+The store is the slow tier — a relief valve that keeps the inline layer thin
+without losing the rationale.
+
+**Layout.** Heavy assistive rationale lives one-note-per-file at
+`docs/atramentous/store/<slug>.md`. The `<slug>` is lowercase kebab-case, stable,
+unique — and it *is* the note's ID. The code keeps only a breadcrumb pointer to
+the note; the payload moves out.
+
+**Note format.** YAML frontmatter + body:
+
+```
+---
+id: renderer-parity-rationale      # == the slug; the note's identity
+title: Why the CPU path is the parity oracle
+status: SCAFFOLD                   # the lifecycle status of the node it carries
+links: [[M14 Vulkan Renderer]] [[TEST RendererParityTests]]
+register: SCAFFOLD DebugBitmapCanvasRenderer   # optional back-ref to register row
+---
+
+why: ...the full rationale that used to sit inline...
+related: [[...]]
+future: [[...]]
+risk: ...
+```
+
+**Pointer syntax** (the breadcrumb left behind in the code):
+
+```
+// atra: see [[store:<slug>]] — <the concrete failure that follows from not querying it here>
+```
+
+- The `store:` namespace inside the link marks an externalization pointer.
+  `grep -rn 'store:'` lists every pointer; `[[store:<slug>]]` resolves iff
+  `docs/atramentous/store/<slug>.md` exists (a pointer to a missing note is a
+  dead link like any other).
+- The trailing clause is mandatory and must state the *failure averted* by
+  knowing to look there — not "more detail in the store." A pointer earns its
+  slot only if not knowing to query the note would cause a concrete mistake.
+
+**What may be externalized — assistive memory only.** Externalization is a tool
+for `why:` / `related:` / `future:` / `risk:` weight. It is governed by the same
+density and growth rules that govern any assistive node.
+
+**What never leaves the code — guardrails.** A node is a **guardrail**, defined
+mechanically, if its status is `SAFETY` or `SPINE`, **or** it carries a `do-not:`
+field. Guardrails stay inline and always-visible regardless of density or
+growth. Never move a guardrail's payload to the store, never replace it with a
+pointer, never count it against a density budget. Safety memory must be in front
+of the agent at the moment it could trip the wire — a pointer there is a latency
+the wire can't afford.
+
+**Pointers count against the budget.** A pointer is a node. A wall of
+"maybe check the store" summons is exactly the noise the budget exists to kill,
+so pointers are budgeted like any other node (see below). Externalizing heavy
+rationale and then leaving five pointers to it has not reduced density.
+
 ## The memory budget (anti-noise law)
 
 Memory is read by every future agent, so it pays rent or it isn't written:
@@ -128,6 +189,11 @@ Memory is read by every future agent, so it pays rent or it isn't written:
 4. Record reason, not implementation.
 5. Fails the litmus test ("would a fresh agent regret its absence?") → it's
    prose, delete it.
+6. When a region's inline memory outgrows its budget, **move heavy assistive
+   rationale to the store and leave a pointer** — don't delete the rationale, and
+   don't leave it inline taxing every passer-by. Guardrails are exempt: they stay
+   inline always (see the externalized tier above). Density is enforced by
+   `atra-sweep` (`over-density`, `should-externalize`).
 
 ## Never embed
 

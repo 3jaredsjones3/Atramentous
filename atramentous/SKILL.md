@@ -158,6 +158,40 @@ promotion depends on, give them an `unless:` so abandonment is provable rather
 than silent. Unresolved is not the same as immune; bypassed-by-growth is the
 signal.
 
+### Externalized tier (the store — for when inline memory grows heavy)
+
+Inline memory is the fast tier: always in front of the next agent, but taxing
+*every* agent that scrolls past it. Heavy rationale that few agents need, read
+rarely, shouldn't tax everyone forever. As a region matures, move that weight to
+a **store** and leave a thin pointer behind:
+
+```kotlin
+// atra: see [[store:renderer-parity-rationale]] — optimizing this path silently breaks brush parity
+```
+
+The payload lives one-note-per-file at `docs/atramentous/store/<slug>.md`
+(YAML frontmatter `id`/`title`/`status`/`links`, then the heavy `why:`/`risk:`
+body). The `<slug>` is the note's ID. `[[store:<slug>]]` resolves iff that file
+exists, so a pointer to a missing note is a dead link.
+
+Three things keep this honest, and they are not optional:
+
+1. **Only assistive memory externalizes.** `why:` / `related:` / `future:` /
+   `risk:` weight may move. The store is a tool for *density*, not for hiding.
+2. **Guardrails never leave the code.** A node whose status is `SAFETY` or
+   `SPINE`, or that carries a `do-not:`, is a guardrail — it stays inline and
+   always-visible regardless of density or growth. A safety wire behind a pointer
+   is a safety wire the agent trips before it reads. Never externalize one.
+3. **Pointers count against the budget.** A pointer is a node. A wall of "maybe
+   check the store" is the exact noise the budget kills. A pointer earns its slot
+   only if not knowing to query the note would cause a concrete failure — and its
+   trailing clause must say which one.
+
+Local memory stays light and the inline/external balance shifts as the codebase
+grows: small/young/dormant regions keep everything inline; mature, heavily-grown
+regions externalize. `atra-sweep` enforces this with the `over-density` (budget)
+and `should-externalize` (growth) findings.
+
 ## The register
 
 Inline annotations are the distributed memory. The **register** is its index:

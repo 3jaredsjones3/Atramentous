@@ -114,6 +114,17 @@ scaffold, rewriting a guardrail, or deleting live code stays with `atra-reconcil
 under a human. In CI the PR is the gate. Harness options (GitHub Actions, cron,
 launchd, Cowork schedule) are in `atra-sweep/harness/`.
 
+The linter also keeps the inline layer light as a project grows. **over-density**
+flags a file or function carrying more assistive annotation than its budget
+(`--max-nodes-per-function`, `--node-line-ratio`), and **should-externalize**
+flags a heavy inline node whose region has grown past `--externalize-threshold`
+commits — both suggest moving the heavy rationale to an external store
+(`docs/atramentous/store/<slug>.md`) and leaving a `[[store:<slug>]]` pointer, so
+local memory stays thin and the internal/external balance shifts with size.
+Guardrails (`SAFETY`/`SPINE` or any `do-not:` node) are never moved, budgeted, or
+suppressed — safety memory always stays inline. Every threshold is a flag whose
+default is a *reasoned default — tune with use, not empirically derived*.
+
 ## Optional
 
 A tiny `atra-help` reference-card skill is easy to add if you want
