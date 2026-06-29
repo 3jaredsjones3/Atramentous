@@ -89,6 +89,12 @@ Detected drift:
   when the region was small; now it taxes every passer-by → move the payload to
   `docs/atramentous/store/<slug>.md` and leave a `[[store:<slug>]]` pointer.
   Small / young / dormant regions are never flagged.
+- **consult-gateless** — a `CONSULT` node (a decision deferred to a human) whose
+  `gate:` names no `[[phase]]`. A deferred consultation without a gate to a named
+  phase is the "later means never" failure — it decides by neglect. Structural and
+  deterministic (presence of a `[[link]]` in the gate, not its resolution: a gate
+  to an unbuilt milestone is correct). Guardrail-exempt. See *Working with a human
+  collaborator* in the grammar.
 
 **Guardrails are exempt from both density findings.** A node whose status is
 `SAFETY` or `SPINE`, or that carries a `do-not:` field, is a guardrail: it is

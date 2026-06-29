@@ -53,6 +53,16 @@ not replace them.
 Companion single-purpose markers that may appear as status or as a `do-not`/`risk`
 qualifier: `SAFETY`, `PERF`, `DECISION`, `TODO`, `FIXME`.
 
+| status | meaning | advances to |
+|---|---|---|
+| `CONSULT` | a decision deferred to a human at a *named future phase* — a consultation scaffolded for when it becomes ripe to judge | resolved (record a `DECISION`) / dropped |
+
+`CONSULT` is a scaffold aimed at a person rather than at code (see *Working with a
+human collaborator*). Like any forward-looking node it is only honest with a
+gate: its `gate:` **must** name the phase where it becomes decidable. A `CONSULT`
+with no `[[named phase]]` gate is the "later means never" failure and the linter
+flags it (`consult-gateless`).
+
 ## Fields
 
 | field | meaning | required for |
@@ -64,6 +74,8 @@ qualifier: `SAFETY`, `PERF`, `DECISION`, `TODO`, `FIXME`.
 | `gate:` / `promote-when:` | testable condition that advances the lifecycle | SCAFFOLD, EXPERIMENT |
 | `risk:` | what breaks if forgotten or retained too long | SCAFFOLD, DECISION |
 | `do-not:` | guardrail a future agent might trip | SPINE, SAFETY |
+| `default:` | the provisional decision in effect *now*, so a deferred consultation never blocks | CONSULT |
+| `ask:` | the single judgment/feel/intent question to put to the human when the gate's phase arrives | CONSULT |
 
 ### Required-field contract by node type
 
@@ -72,6 +84,7 @@ qualifier: `SAFETY`, `PERF`, `DECISION`, `TODO`, `FIXME`.
 - EXPERIMENT → `why` + `gate`
 - DECISION → `why` + rejected alternatives + `risk`
 - SAFETY → `why` + `do-not` + the invariant that must hold
+- CONSULT → `why` (what makes it not agent-decidable) + `default` (provisional answer in effect) + `gate` (the `[[named phase]]` where it ripens) + `ask` (the one question)
 - Breadcrumb → links (+ optional one-clause why)
 
 ## Links
@@ -194,6 +207,88 @@ Memory is read by every future agent, so it pays rent or it isn't written:
    don't leave it inline taxing every passer-by. Guardrails are exempt: they stay
    inline always (see the externalized tier above). Density is enforced by
    `atra-sweep` (`over-density`, `should-externalize`).
+
+## Working with a human collaborator
+
+The mechanics above decide *what memory to keep*. This decides *when to interrupt
+a person* — the other half of collaboration. Every decision the agent meets during
+work resolves on two axes:
+
+1. **Can I decide this well?** (is it within agent judgment, or genuinely
+   subjective / intent-bound / risk-bound in a way only the human can settle?)
+2. **Must it be decided well *now*?** — or is there a later point that is both
+   *cheaper to change* and *easier to judge* (something real to look at)?
+
+Four quadrants:
+
+| | must decide now | can wait |
+|---|---|---|
+| **decidable** | decide it; record a `DECISION` node; proceed | decide provisionally; `SCAFFOLD` it with a gate; proceed — bother no one |
+| **not decidable** | **escalate** (four-part format below) | **scaffold the consultation**: leave a `CONSULT` gated to the phase where it ripens; proceed silently |
+
+The fourth quadrant is the one most agents get wrong — they either ask now (too
+early to judge) or never (silent decision by neglect). Do neither. **Confirming a
+decision later is just future scaffolding aimed at a person**: leave a gated
+`CONSULT` node and proceed. When that phase arrives, the sweep surfaces it and the
+human is asked — batched, against something real, at peak decidability.
+
+Example: during a get-it-usable phase, exact UI panel widths are subjective (the
+agent can't judge them by feel) but cheap to change and *better judged later
+against a running interface*. The agent does not ask now and does not ask after —
+it leaves a gated `CONSULT` and proceeds:
+
+```
+// ATRAMENTOUS  CONSULT
+// why:     panel widths are a feel-call; can't be judged by eye pre-render
+// default: 280px side / 1fr main — provisional, in effect now so nothing blocks
+// gate:    [[M12 UI Polish]] — batch a human feel-test here
+// ask:     do these proportions feel right against the running interface?
+```
+
+At `[[M12 UI Polish]]` the sweep surfaces it and a batch of such feel-calls go to
+the human together, at peak decidability.
+
+### Escalation format (must-decide-now + not-decidable only)
+
+A halt-and-wait escalation is allowed **only** when it carries, in this order:
+
+1. **What happened** — one line.
+2. **What I already determined** — the forensics, done by the agent and never
+   handed up as a chore: reconstruct from git history, the surrounding code, the
+   `do-not` clause. The human inherits conclusions, not homework.
+3. **What I'll do by default** — a concrete recommended action, not "how should I
+   proceed?".
+4. **The one question** — phrased so the answer is a judgment / risk / intent
+   call, never a fact the agent could have established itself.
+
+Test of a well-formed escalation: *could the agent have answered its own question
+by working harder?* If yes, it is not ready to escalate — that's risk-offloading,
+not consultation. Reserve escalation for genuine subjectivity the agent can't
+resolve. A bare "go fix this" alert with no four parts attached is never allowed.
+
+### Reversibility prior (this collaborator's stated preference)
+
+> This human prefers a wrong default they can correct over a question they can't
+> yet answer. Bias hard toward **act-and-report** for anything cheap to reverse.
+
+"Reversible" means cheap to reverse *including everything later built on it*. Git
+makes the mechanical undo free, but a foundation that twenty dependent tasks now
+assume is **not** cheap to reverse. So confirm load-bearing-but-early decisions at
+a *near* checkpoint — a few milestones out, not twenty — via a scaffolded
+`CONSULT`: early enough that the blast radius is still small, late enough that
+there is something real to judge.
+
+### Invariants
+
+- A deferred `CONSULT` **must** carry a `gate:` to a **named phase**
+  (`[[Mxx ...]]`), never "later". A consultation without a gate is "later means
+  never" wearing politeness — it decides by neglect. This is the forward-link
+  honesty rule applied to decisions, and the linter enforces it
+  (`consult-gateless`).
+- **Don't escalate to offload risk.** If the agent could decide better than most
+  users, it decides, records a `DECISION`, and proceeds — surfacing for review
+  without blocking. Escalation is for what the agent genuinely cannot judge.
+- **Halt-and-wait requires the four-part escalation.** No bare alerts.
 
 ## Never embed
 

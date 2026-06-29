@@ -21,6 +21,8 @@ What it detects:
   - should-externalize           (a heavy inline ASSISTIVE node whose region has
                                   grown > externalize-threshold neighborhood-commits
                                   → move its payload to the store, leave a pointer)
+  - consult-gateless             (a CONSULT node — a decision deferred to a human —
+                                  whose gate names no [[phase]]; "later means never")
 
 Staleness is measured in DEVELOPMENT, not calendar time: the unit is commits in
 the plan's neighborhood since it was written, not days. A plan is stale when the
@@ -58,10 +60,10 @@ SENTINEL = "ATRAMENTOUS"
 BREADCRUMB = re.compile(r"\batra:\s*(.*)$")
 LINK = re.compile(r"\[\[([^\]]+)\]\]")
 STATUS = re.compile(r"\bATRAMENTOUS\b[^\n]*?\b(SPINE|SCAFFOLD|EXPERIMENT|REFERENCE|"
-                    r"PRODUCTION|DEPRECATED|REMOVABLE|DECISION|SAFETY)\b")
+                    r"PRODUCTION|DEPRECATED|REMOVABLE|DECISION|SAFETY|CONSULT)\b")
 OPEN_STATUSES = {"SCAFFOLD", "EXPERIMENT", "DECISION"}
 FIELD = re.compile(r"^\s*(?://|#|--|<!--)?\s*(why|related|future|gate|promote-when|unless|"
-                   r"risk|do-not|status)\s*:\s*(.*)$", re.I)
+                   r"risk|do-not|status|default|ask)\s*:\s*(.*)$", re.I)
 # link prefixes that imply a concrete artifact (so an unresolved one is higher signal)
 CONCRETE_PREFIX = re.compile(r"^\s*(TEST|ADR-|M\d|SPINE|SAFETY|SCAFFOLD)\b")
 # externalization pointer: `[[store:<slug>]]` points at docs/atramentous/store/<slug>.md
@@ -221,12 +223,17 @@ def extract_nodes(lines):
         sm = STATUS.search(line)
         if sm:
             status = sm.group(1).upper()
-            fields, j = set(), i + 1
+            fields, j, gate_link = set(), i + 1, False
             while j < n:
                 lj = lines[j]
                 fm = FIELD.match(lj)
                 if fm:
-                    fields.add(fm.group(1).lower()); j += 1; continue
+                    name = fm.group(1).lower()
+                    fields.add(name)
+                    # a gate to a NAMED phase carries a [[link]]; "gate: later" doesn't.
+                    if name == "gate" and "[[" in lj:
+                        gate_link = True
+                    j += 1; continue
                 if lj.strip() == "":
                     break
                 if lj.lstrip().startswith(("//", "#", "--", "*", "<!--")):
@@ -234,7 +241,7 @@ def extract_nodes(lines):
                 break
             guard = status in ("SAFETY", "SPINE") or "do-not" in fields
             nodes.append(dict(start=i + 1, kind="block", status=status, fields=fields,
-                              guard=guard, pointer=False, nlines=j - i,
+                              guard=guard, pointer=False, nlines=j - i, gate_link=gate_link,
                               label=block_label(status, lines[i:j])))
             i = j; continue
         bm = BREADCRUMB.search(line)
@@ -337,6 +344,22 @@ def externalize_findings(rel, hood, nodes, meta, root, threshold, heavy_lines):
     return out
 
 
+def collab_findings(rel, nodes):
+    """consult-gateless: a CONSULT node (a decision deferred to a human) whose gate
+    does not name a phase with a [[link]]. A deferred consultation without a gate to
+    a NAMED phase is the 'later means never' failure — it decides by neglect. This is
+    the forward-link honesty rule applied to decisions: structural, deterministic.
+    Guardrails are exempt (a CONSULT carrying do-not is never budgeted/gated here)."""
+    out = []
+    for nd in nodes:
+        if nd.get("status") == "CONSULT" and not nd["guard"]:
+            if "gate" not in nd["fields"] or not nd.get("gate_link"):
+                out.append(dict(kind="consult-gateless", sev="med", loc=f"{rel}:{nd['start']}",
+                                detail="CONSULT has no gate to a [[named phase]] — gate it to "
+                                       "the phase where it ripens, or it decides by neglect"))
+    return out
+
+
 def scan(root, age_commits, decision_commits, future_age_commits,
          max_per_func=1, node_line_ratio=25, density_floor=1,
          externalize_threshold=40, heavy_node_lines=4):
@@ -414,6 +437,7 @@ def scan(root, age_commits, decision_commits, future_age_commits,
         nodes = extract_nodes(lines)
         findings += density_findings(rel, lines, nodes, max_per_func,
                                      node_line_ratio, density_floor)
+        findings += collab_findings(rel, nodes)   # structural, git-independent
         if git:
             findings += externalize_findings(rel, hood, nodes, meta, root,
                                              externalize_threshold, heavy_node_lines)
@@ -602,6 +626,22 @@ def selftest():
             "fun a() {}\n"
             "// atra: see [[store:ghost-note]] — points at no note\n"
             "fun b() {}\n")
+        # CONSULT nodes: a gated one (named phase) is fine; a gateless one ("later")
+        # is the deferred-consultation-by-neglect failure -> consult-gateless.
+        (root / "zoneConsult").mkdir()
+        (root / "zoneConsult" / "c.kt").write_text(
+            "// ATRAMENTOUS CONSULT\n"
+            "// why: panel widths are a feel-call\n"
+            "// default: 280px side / 1fr main — provisional, in effect now\n"
+            "// gate: [[M12 UI Polish]] — batch a human feel-test here\n"
+            "// ask: do these proportions feel right?\n"
+            "fun goodConsult() {}\n"
+            "// ATRAMENTOUS CONSULT\n"
+            "// why: deferred but ungated\n"
+            "// default: provisional\n"
+            "// gate: later\n"
+            "// ask: feel right?\n"
+            "fun badConsult() {}\n")
 
         git("add", "-A"); git("commit", "-qm", "seed")
 
@@ -653,6 +693,13 @@ def selftest():
         assert not any("zoneDorm" in x["loc"] for x in se), "wrongly externalized a dormant heavy node"
         # a guardrail in the grown zone is NEVER externalized
         assert not any("safety" in x["loc"].lower() for x in se), "wrongly externalized a guardrail"
+
+        # --- Phase 2: consult-gateless (deferred-consultation honesty) ---
+        cg = [x for x in f if x["kind"] == "consult-gateless"]
+        # the gateless CONSULT ("gate: later") flags; the [[M12 ...]]-gated one does not
+        assert any("zoneConsult" in x["loc"] for x in cg), "missed gateless CONSULT"
+        assert len([x for x in cg if "zoneConsult" in x["loc"]]) == 1, \
+            "consult-gateless should fire once: the gated CONSULT must NOT flag"
 
         print("selftest ok:", sorted(kinds))
         return 0

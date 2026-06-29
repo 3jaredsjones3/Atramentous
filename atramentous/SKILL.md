@@ -116,6 +116,8 @@ Field set (include only fields that pass the litmus test — never all of them b
 | `gate:` / `promote-when:` | the testable condition that advances the node's lifecycle | scaffold, experiment |
 | `risk:` | what breaks if forgotten or kept too long | scaffold, decision |
 | `do-not:` | the guardrail a future agent might trip | spine, safety |
+| `default:` | the provisional answer in effect now, so a deferred consultation never blocks | consult |
+| `ask:` | the one judgment/feel/intent question to put to the human when the gate's phase arrives | consult |
 
 ### Required fields by node type
 
@@ -124,6 +126,7 @@ Field set (include only fields that pass the litmus test — never all of them b
 - **EXPERIMENT** (hypothesis): `why` + `gate` (what proves/kills it).
 - **DECISION** (needs human review): `why` + the rejected alternatives + `risk`.
 - **SAFETY** (data-loss / destructive / validation): `why` + `do-not` + the invariant that must hold.
+- **CONSULT** (decision deferred to a human): `why` (what makes it not agent-decidable) + `default` (provisional answer in effect) + `gate` (the `[[named phase]]` where it ripens) + `ask` (the one question).
 - **Breadcrumb** (navigation only): just `atra:` + links.
 
 ## Scaffolding is the reflex, not a chore
@@ -268,6 +271,62 @@ whole repo's backlog on every task is noise. Surface what's relevant to *this*
 edit, offer to act, and never auto-fix. Entropy that accumulates outside the area
 you're touching is the scheduled sweep's job (`atra-sweep`), not an interruption
 to the current task.
+
+## Working with a human collaborator
+
+The memory budget decides *what to write*. This decides *when to interrupt the
+person* — and the default is **don't**. Every decision you hit during work sorts
+on two axes: *can I decide this well?* and *must it be decided well now* (versus a
+later point that is both cheaper to change and easier to judge)?
+
+```
+                    must decide NOW            can WAIT
+  decidable     decide; record a DECISION   decide provisionally; SCAFFOLD
+                node; proceed               with a gate; proceed (bother no one)
+  not           ESCALATE (four-part         SCAFFOLD THE CONSULTATION: a gated
+  decidable     format); halt-and-wait      CONSULT at the ripe phase; proceed silently
+```
+
+The bottom-right quadrant is where agents fail — they ask too early (nothing real
+to judge yet) or never (a silent decision by neglect). Do neither. **Confirming a
+decision later is just future scaffolding aimed at a person.** Leave a `CONSULT`
+node gated to the phase where it becomes ripe, and proceed:
+
+```kotlin
+// ATRAMENTOUS  CONSULT
+// why:     panel widths are a feel-call; can't be judged by eye pre-render
+// default: 280px side / 1fr main — provisional, in effect now so nothing blocks
+// gate:    [[M12 UI Polish]] — batch a human feel-test here
+// ask:     do these proportions feel right against the running interface?
+```
+
+When `[[M12 UI Polish]]` arrives, the sweep surfaces it and a batch of such
+feel-calls go to the human at once, at peak decidability — against a running
+interface, not a guess.
+
+**Reversibility prior — this collaborator's stated preference:** *a wrong default
+they can correct beats a question they can't yet answer.* Bias hard toward
+act-and-report for anything cheap to reverse. But "reversible" includes everything
+later built on it: git makes the mechanical undo free, yet a foundation twenty
+dependent tasks now assume is **not** cheap to reverse. Confirm load-bearing-but-
+early decisions at a *near* checkpoint (a few milestones out, not twenty) via a
+scaffolded `CONSULT` — early enough that the blast radius is small, late enough
+that there's something real to judge.
+
+**When you do escalate** (must-decide-now *and* genuinely not agent-decidable),
+the halt carries four things, in order, or it isn't allowed:
+
+1. what happened (one line);
+2. what you already determined — the forensics, done by you, never handed up as a
+   chore (reconstruct from git history, surrounding code, the `do-not` clause);
+3. what you'll do by default — a concrete recommended action;
+4. the one question — phrased so the answer is a judgment/risk/intent call, never
+   a fact you could have established yourself.
+
+Test: *could you have answered your own question by working harder?* If yes, it's
+risk-offloading, not consultation — go work harder. Reserve escalation for genuine
+subjectivity. A `CONSULT` without a `[[named phase]]` gate is "later means never"
+wearing politeness; the linter flags it (`consult-gateless`).
 
 ## The companions
 
