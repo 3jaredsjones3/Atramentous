@@ -23,6 +23,10 @@ What it detects:
                                   → move its payload to the store, leave a pointer)
   - consult-gateless             (a CONSULT node — a decision deferred to a human —
                                   whose gate names no [[phase]]; "later means never")
+  - broken-guardrail-pointer     (HIGH: a broken [[store:<slug>]] pointer sitting on a
+                                  GUARDRAIL node — its safety rationale vanished. A
+                                  broken store-pointer on a plain node stays an
+                                  ordinary unresolved-link.)
 
 Staleness is measured in DEVELOPMENT, not calendar time: the unit is commits in
 the plan's neighborhood since it was written, not days. A plan is stale when the
@@ -63,7 +67,7 @@ STATUS = re.compile(r"\bATRAMENTOUS\b[^\n]*?\b(SPINE|SCAFFOLD|EXPERIMENT|REFEREN
                     r"PRODUCTION|DEPRECATED|REMOVABLE|DECISION|SAFETY|CONSULT)\b")
 OPEN_STATUSES = {"SCAFFOLD", "EXPERIMENT", "DECISION"}
 FIELD = re.compile(r"^\s*(?://|#|--|<!--)?\s*(why|related|future|gate|promote-when|unless|"
-                   r"risk|do-not|status|default|ask)\s*:\s*(.*)$", re.I)
+                   r"risk|do-not|status|default|ask|local-only)\s*:\s*(.*)$", re.I)
 # link prefixes that imply a concrete artifact (so an unresolved one is higher signal)
 CONCRETE_PREFIX = re.compile(r"^\s*(TEST|ADR-|M\d|SPINE|SAFETY|SCAFFOLD)\b")
 # externalization pointer: `[[store:<slug>]]` points at docs/atramentous/store/<slug>.md
@@ -223,7 +227,7 @@ def extract_nodes(lines):
         sm = STATUS.search(line)
         if sm:
             status = sm.group(1).upper()
-            fields, j, gate_link = set(), i + 1, False
+            fields, j, gate_link, local_only = set(), i + 1, False, False
             while j < n:
                 lj = lines[j]
                 fm = FIELD.match(lj)
@@ -233,6 +237,9 @@ def extract_nodes(lines):
                     # a gate to a NAMED phase carries a [[link]]; "gate: later" doesn't.
                     if name == "gate" and "[[" in lj:
                         gate_link = True
+                    # local-only: true → never externalize (a port of a <private> tag)
+                    if name == "local-only" and "true" in fm.group(2).lower():
+                        local_only = True
                     j += 1; continue
                 if lj.strip() == "":
                     break
@@ -242,7 +249,7 @@ def extract_nodes(lines):
             guard = status in ("SAFETY", "SPINE") or "do-not" in fields
             nodes.append(dict(start=i + 1, kind="block", status=status, fields=fields,
                               guard=guard, pointer=False, nlines=j - i, gate_link=gate_link,
-                              label=block_label(status, lines[i:j])))
+                              local_only=local_only, label=block_label(status, lines[i:j])))
             i = j; continue
         bm = BREADCRUMB.search(line)
         if bm:
@@ -330,10 +337,14 @@ def externalize_findings(rel, hood, nodes, meta, root, threshold, heavy_lines):
     """should-externalize: a HEAVY inline assistive node whose region has grown past
     --externalize-threshold neighborhood-commits → move its payload to the store and
     leave a pointer. Small/young/dormant regions keep memory inline (no growth, no
-    flag). Guardrails are never externalized regardless of growth."""
+    flag). Guardrails are never externalized regardless of growth; neither are
+    `local-only` nodes (a second, independent exclusion — site-bound memory that is
+    meaningless away from its code, the port of a <private> tag). local-only does
+    NOT make a node a guardrail; it only blocks externalization."""
     out = []
     for nd in nodes:
-        if nd["kind"] != "block" or nd["guard"] or nd["nlines"] < heavy_lines:
+        if (nd["kind"] != "block" or nd["guard"] or nd.get("local_only")
+                or nd["nlines"] < heavy_lines):
             continue
         _, h = meta.get(nd["start"], (None, None))
         n = commits_since(h, hood, root)
@@ -378,6 +389,13 @@ def scan(root, age_commits, decision_commits, future_age_commits,
         meta = blame_meta(f, root) if git else {}
         rel = os.path.relpath(f, root)
         hood = neighborhood_of(rel)
+        # parse nodes once, up front: the link checker needs to know whether a
+        # broken store-pointer sits on a GUARDRAIL (the safety-sensitive case).
+        nodes = extract_nodes(lines)
+        guard_lines = set()
+        for nd in nodes:
+            if nd["guard"]:
+                guard_lines.update(range(nd["start"], nd["start"] + nd["nlines"]))
         in_block = False
         block_status = None
         block_start = 0
@@ -414,9 +432,22 @@ def scan(root, age_commits, decision_commits, future_age_commits,
                                                  detail=f"[[{lk}]] unbuilt while {hood}/ moved {n} commits past it — still the plan?"))
                     continue
                 if not resolves(lk, targets):
-                    sev = "med" if CONCRETE_PREFIX.match(lk) else "low"
-                    findings.append(dict(kind="unresolved-link", sev=sev,
-                                         loc=f"{rel}:{i}", detail=f"[[{lk}]] has no target"))
+                    if STORE_LINK.match(lk) and i in guard_lines:
+                        # A broken [[store:]] pointer ON A GUARDRAIL: the node is
+                        # SAFETY/SPINE or carries do-not:, and the store note that
+                        # held its rationale is gone. A guardrail whose warning
+                        # silently stopped warning is the loudest thing here. HIGH.
+                        findings.append(dict(kind="broken-guardrail-pointer", sev="high",
+                                             loc=f"{rel}:{i}",
+                                             detail=f"[[{lk}]] on a guardrail has no store note — "
+                                                    f"its safety rationale silently vanished"))
+                    else:
+                        # ordinary broken link, store-pointer or not. The store
+                        # case self-heals: the sweep recomputes it every run from
+                        # the live tree — derived, not stored (no log written).
+                        sev = "med" if CONCRETE_PREFIX.match(lk) else "low"
+                        findings.append(dict(kind="unresolved-link", sev=sev,
+                                             loc=f"{rel}:{i}", detail=f"[[{lk}]] has no target"))
 
             # close a block heuristically on blank-ish boundary
             if in_block and (line.strip() == "" or (not line.lstrip().startswith(("//", "#", "--", "*", "<!--")) and i > block_start)):
@@ -433,8 +464,8 @@ def scan(root, age_commits, decision_commits, future_age_commits,
                                              detail=f"{block_status} unmoved while {hood}/ took {n} commits (> {thr})"))
                 in_block, block_status = False, None
 
-        # density + growth tiers (additive; independent of the aging loop above)
-        nodes = extract_nodes(lines)
+        # density + growth tiers (additive; independent of the aging loop above).
+        # `nodes` was parsed once above (also feeds the guardrail-pointer check).
         findings += density_findings(rel, lines, nodes, max_per_func,
                                      node_line_ratio, density_floor)
         findings += collab_findings(rel, nodes)   # structural, git-independent
@@ -571,6 +602,15 @@ def selftest():
             "// do-not: write in place; always temp-then-rename\n"
             "// invariant: fsync the temp file before the rename\n"
             "fun atomicSave() {}\n")
+        # a LOCAL-ONLY heavy node in the SAME grown neighborhood — heavy and grown
+        # like a.kt, but local-only:true blocks externalization (2nd exclusion).
+        (root / "zoneA" / "localonly.kt").write_text(
+            "// ATRAMENTOUS REFERENCE\n"
+            "// why: this rationale is meaningless away from this exact call site\n"
+            "// local-only: true\n"
+            "// risk: a port of a <private> tag — inlining it elsewhere is a lie\n"
+            "// related: [[compute]]\n"
+            "fun siteBound() {}\n")
         # zone B: dormant — a forward-link that nothing ever grows past
         (root / "zoneB").mkdir()
         (root / "zoneB" / "b.kt").write_text(
@@ -642,6 +682,16 @@ def selftest():
             "// gate: later\n"
             "// ask: feel right?\n"
             "fun badConsult() {}\n")
+        # broken store-pointer ON A GUARDRAIL -> high-sev broken-guardrail-pointer.
+        # (zonePtr/p.kt already has a broken store-pointer on a PLAIN breadcrumb,
+        # which must stay an ordinary unresolved-link — the control.)
+        (root / "zoneGuardPtr").mkdir()
+        (root / "zoneGuardPtr" / "gp.kt").write_text(
+            "// ATRAMENTOUS SAFETY\n"
+            "// why: the atomic-save invariant; heavy rationale lives in the store\n"
+            "// do-not: write in place; read the store note before touching this\n"
+            "// related: [[store:atomic-save-rationale]]\n"   # note does NOT exist -> broken
+            "fun guardedSave() {}\n")
 
         git("add", "-A"); git("commit", "-qm", "seed")
 
@@ -693,6 +743,9 @@ def selftest():
         assert not any("zoneDorm" in x["loc"] for x in se), "wrongly externalized a dormant heavy node"
         # a guardrail in the grown zone is NEVER externalized
         assert not any("safety" in x["loc"].lower() for x in se), "wrongly externalized a guardrail"
+        # local-only heavy node in the grown zone is NEVER externalized (2nd exclusion);
+        # a.kt is the without-flag control above — same heaviness + growth, but it DOES flag.
+        assert not any("localonly" in x["loc"].lower() for x in se), "wrongly externalized a local-only node"
 
         # --- Phase 2: consult-gateless (deferred-consultation honesty) ---
         cg = [x for x in f if x["kind"] == "consult-gateless"]
@@ -700,6 +753,24 @@ def selftest():
         assert any("zoneConsult" in x["loc"] for x in cg), "missed gateless CONSULT"
         assert len([x for x in cg if "zoneConsult" in x["loc"]]) == 1, \
             "consult-gateless should fire once: the gated CONSULT must NOT flag"
+
+        # --- broken store-pointer severity split (guardrail vs assistive) ---
+        # resolving store-pointer (existing-note) flags nothing:
+        assert not any("existing-note" in x.get("detail", "") for x in f), \
+            "a resolving store-pointer must not flag"
+        # broken pointer on a GUARDRAIL -> high-sev distinct kind:
+        bgp = [x for x in f if x["kind"] == "broken-guardrail-pointer"]
+        assert any("atomic-save-rationale" in x["detail"] for x in bgp), \
+            "missed broken store-pointer on a guardrail"
+        assert all(x["sev"] == "high" for x in bgp), "broken-guardrail-pointer must be high sev"
+        # ...and it must NOT also appear as an ordinary unresolved-link:
+        assert not any(x["kind"] == "unresolved-link" and "atomic-save-rationale" in x["detail"]
+                       for x in f), "guardrail store-pointer leaked into ordinary unresolved-link"
+        # broken pointer on a PLAIN node stays an ordinary unresolved-link (ghost-note):
+        assert any(x["kind"] == "unresolved-link" and "ghost-note" in x["detail"] for x in f), \
+            "broken store-pointer on a plain node must stay ordinary unresolved-link"
+        assert not any(x["kind"] == "broken-guardrail-pointer" and "ghost-note" in x["detail"]
+                       for x in f), "plain broken store-pointer wrongly escalated to guardrail kind"
 
         print("selftest ok:", sorted(kinds))
         return 0

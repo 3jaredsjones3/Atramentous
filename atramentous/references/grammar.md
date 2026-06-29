@@ -76,6 +76,7 @@ flags it (`consult-gateless`).
 | `do-not:` | guardrail a future agent might trip | SPINE, SAFETY |
 | `default:` | the provisional decision in effect *now*, so a deferred consultation never blocks | CONSULT |
 | `ask:` | the single judgment/feel/intent question to put to the human when the gate's phase arrives | CONSULT |
+| `local-only:` | `true` marks a node as **site-bound** — meaningless away from this exact code location, so it is never externalized to the store (the port of a `<private>` tag). A second, independent exclusion from externalization; it does *not* make the node a guardrail | any externalizable node whose rationale only makes sense in place |
 
 ### Required-field contract by node type
 
@@ -187,10 +188,36 @@ pointer, never count it against a density budget. Safety memory must be in front
 of the agent at the moment it could trip the wire — a pointer there is a latency
 the wire can't afford.
 
+**A second exclusion — `local-only`.** A node carrying `local-only: true` is also
+never externalized: its rationale is *site-bound*, meaningless away from this exact
+code location (the port of a `<private>` tag). Unlike a guardrail it is *not*
+exempt from the density budget — it still counts, and an over-dense region full of
+local-only nodes should be thinned by other means — but it is permanently excluded
+from `should-externalize` candidacy. `local-only` blocks the move; it does not make
+the node safety memory.
+
 **Pointers count against the budget.** A pointer is a node. A wall of
 "maybe check the store" summons is exactly the noise the budget exists to kill,
 so pointers are budgeted like any other node (see below). Externalizing heavy
 rationale and then leaving five pointers to it has not reduced density.
+
+**Disclosure path — L0 / L1 / L2.** The store is read progressively, cheapest
+first. There is deliberately **no generated `index.md`**: the notes' own
+front-matter *is* the index.
+
+- **L0 — the inline pointer.** `// atra: see [[store:<slug>]] — <failure averted>`,
+  free in the agent's context as it reads the code. The failure-clause alone often
+  resolves the question; the slug is the address if it doesn't.
+- **L1 — browse the front-matter.** `grep` the store notes' YAML front-matter
+  (`id` / `title` / `status` / `links`) to discover *what notes exist* without
+  holding a pointer — the catalogue, derived live from the notes themselves.
+- **L2 — open the note.** Read the full `docs/atramentous/store/<slug>.md` body.
+
+The common path is **L0 → L2**: follow a pointer's slug straight to its note. **L1**
+is the browse path — used when you have no pointer in hand, as `atra-rehydrate` does
+on cold-start to learn the store's contents before walking into an area. No index
+file is maintained because a maintained index is a second source of truth that goes
+stale; the front-matter is canonical and the catalogue is recomputed from it.
 
 ## The memory budget (anti-noise law)
 

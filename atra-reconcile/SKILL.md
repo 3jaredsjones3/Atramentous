@@ -39,8 +39,34 @@ change here alters what the code does, you've left the skill's scope.
 6. **Refresh stale guardrails.** "Do not simplify until M12" past M12 → lift it or
    restate the real current constraint. A guardrail no one can trust gets ignored,
    including the true ones next to it.
-7. **Resync the register.** Every heavy node present inline appears in the
-   register and vice versa; statuses match; closed items are marked closed.
+7. **Externalize what outgrew its inline slot.** When the linter flags a node
+   `should-externalize` (or a human approves a move), migrate its heavy *assistive*
+   payload out of the code and into the store. Reconcile is the one place that
+   actually performs this migration:
+   1. **Create the note.** Write `docs/atramentous/store/<slug>.md` (slug =
+      lowercase-kebab, stable, unique — it *is* the note's id). YAML front-matter
+      `id` / `title` / `status` / `links`, then the heavy `why:` / `related:` /
+      `future:` / `risk:` body, lifted verbatim from inline.
+   2. **Leave the pointer.** Replace the moved block in the code with one
+      breadcrumb — `// atra: see [[store:<slug>]] — <the concrete failure that
+      follows from not querying it here>`. The failure-clause is mandatory: the
+      pointer counts against density, so it earns its line only by naming what
+      breaks if the next agent doesn't open the note.
+   3. **Flip the register.** Change that node's register row `location` from its
+      inline path to `store:<slug>`, so the index points at the note's new home.
+
+   **Never externalize a guardrail or a `local-only` node.** A node whose status is
+   `SAFETY` or `SPINE`, or that carries a `do-not:`, stays inline and
+   always-visible — the linter never flags it and reconcile never moves it. A
+   `local-only: true` node is meaningless away from its code site and is likewise
+   never externalized. The store holds *assistive* memory only; safety memory and
+   site-bound memory stay in the code beside what they govern. The reverse move is
+   equally valid: a note that became hot again can be inlined — lift the payload
+   back, drop the pointer, flip the register row back to the inline path.
+8. **Resync the register.** Every heavy node appears in the register and vice
+   versa; statuses match; closed items are marked closed; each row's `location`
+   reflects where the node actually lives now — its inline path, or `store:<slug>`
+   for an externalized one.
 
 ## Output
 
@@ -51,8 +77,9 @@ promoted:  [[DebugBitmapRenderer]] SCAFFOLD → REMOVABLE (M14 parity green)
 retired:   [[Legacy Tile Path]] DEPRECATED → deleted (no callers)
 relinked:  BrushPipeline.kt [[Old Pressure]] → [[ADR-0008 Pressure Model]]
 merged:    parity rationale ×3 → [[REFERENCE CPU Rasterizer]]
+externalized: [[Renderer Parity Rationale]] inline → store:renderer-parity-rationale (grown 60 commits; pointer left)
 unblocked: TileCache.kt do-not lifted (M12 shipped)
-register:  +2 rows synced, 1 closed
+register:  +2 rows synced, 1 closed, 1 relocated to store
 ```
 
 ## Boundaries

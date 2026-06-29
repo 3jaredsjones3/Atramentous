@@ -18,14 +18,25 @@ agents undo their own past work.
 ## Procedure
 
 1. **Read the index, not the tree.** Open the register
-   (`docs/atramentous/register.md` or the project's scaffolding register) and any
-   `docs/atramentous/` maps first. This is the table of contents for intent.
+   (`docs/atramentous/register.md` or the project's scaffolding register), any
+   `docs/atramentous/` maps, and the **store** (`docs/atramentous/store/`) first.
+   The store holds the heavy rationale that was externalized out of the code as the
+   project grew; its notes are part of the memory layer you're rehydrating, not an
+   afterthought. There is no `index.md` — the notes' own front-matter *is* the
+   index, so you browse it directly (the **L1** path; see *Working with a human
+   collaborator* / the disclosure path in `references/grammar.md`).
 2. **Sweep the markers.**
    - `grep -rn ATRAMENTOUS` → every heavy node (spine, scaffold, decision, safety).
    - `grep -rn 'atra:'` → every breadcrumb.
+   - `grep -rn 'store:'` → every externalization pointer. The inline pointer and
+     its failure-clause are free in context (**L0**); follow a slug to its note for
+     the full rationale (**L2**: open `docs/atramentous/store/<slug>.md`). Treat the
+     store note as the canonical home of a `why:` that moved there.
    - `grep -rn 'DECISION'` → anything awaiting human/product review. Surface these
      to the user; do not resolve them silently.
    - `grep -rn 'SCAFFOLD\|EXPERIMENT'` → what's intentionally incomplete and why.
+   - `grep -rn 'CONSULT'` → decisions deferred to a human, gated to a phase; if a
+     gate's phase is the area you're entering, surface it.
 3. **Walk, don't read everything.** Pick the area you're about to touch. Follow
    its `related:` and `future:` links outward one or two hops. The graph tells you
    what this code depends on and what depends on it — far faster than reading the

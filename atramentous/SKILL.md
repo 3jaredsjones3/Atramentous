@@ -118,6 +118,7 @@ Field set (include only fields that pass the litmus test — never all of them b
 | `do-not:` | the guardrail a future agent might trip | spine, safety |
 | `default:` | the provisional answer in effect now, so a deferred consultation never blocks | consult |
 | `ask:` | the one judgment/feel/intent question to put to the human when the gate's phase arrives | consult |
+| `local-only:` | `true` = site-bound memory, never externalized to the store (a port of a `<private>` tag). A second exclusion from `should-externalize`; still budget-counted, and *not* a guardrail | any node whose rationale only makes sense in place |
 
 ### Required fields by node type
 

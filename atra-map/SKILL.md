@@ -19,7 +19,10 @@ it. Most useful once a repo is large enough that grep-and-read stops scaling.
 
 1. **Collect the graph.** `grep -rn ATRAMENTOUS` + `grep -rn 'atra:'` +
    `grep -rn '\[\['` and parse the register. Nodes = annotated locations; edges =
-   `related:` / `future:` links; attributes = status, why, gate, risk.
+   `related:` / `future:` links; attributes = status, why, gate, risk. Also read
+   the store (`docs/atramentous/store/*.md`): each note's front-matter is a node,
+   and every inline `[[store:<slug>]]` pointer is an edge from a code site into it.
+   A note with no pointer referencing it is an orphan — list it in the store map.
 2. **Render the requested views** (default: all that have ≥1 node). Write to
    `docs/atramentous/maps/`. Each map is a markdown document, not a comment.
 
@@ -30,6 +33,7 @@ it. Most useful once a repo is large enough that grep-and-read stops scaling.
 | Decision map | every DECISION node, its rationale, rejected alternatives, status | DECISION nodes |
 | Safety map | every SAFETY path and its invariant + guardrails | SAFETY nodes |
 | Scaffolding map | open scaffolds/experiments, their gates, their risk-if-retained | SCAFFOLD/EXPERIMENT + register |
+| Store map | externalized notes grouped by `status`, each with its `id`/`title`/`links` and the inline pointer site(s) that reference it | store note front-matter + `[[store:]]` pointers |
 | Link atlas | the raw node→node graph (incl. forward-links to unwritten code) | all links |
 
 3. **Mark the frontier.** Forward-links whose targets don't exist yet are the
