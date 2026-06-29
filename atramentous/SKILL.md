@@ -205,6 +205,25 @@ experiments, decisions, deprecations — with ID, status, location, gate, and ri
 When you add or change a heavy node, update the register in the same change.
 `atra-reconcile` keeps them in sync; `atra-map` reads from both.
 
+### Annotatability — can this file even hold a note?
+
+"Annotate in place" only works where the place accepts a note. The register also
+records a per-file **annotatability**:
+
+- `annotate: inline` — the default. Comments belong; normal Atramentous.
+- `annotate: external-only` — the file cannot or must not hold notes, so its
+  memory goes to the store and the pointer relocates (see the degradation ladder
+  in `references/grammar.md`).
+
+A file is `external-only` when it is a **product artifact** (a `SKILL.md` or other
+shipped output — a note there corrupts the deliverable), a **generated file**
+(notes vanish on regen), or has **no comment syntax** (CSV/strict JSON). This is a
+**judgment decided once and cached** — two files of the same type can differ (a
+research `.md` welcomes a note; a `SKILL.md` doesn't), so the first agent to decide
+records it and every later agent inherits the call rather than re-litigating it.
+`external-only` (the file's capacity) is a different axis from `local-only` (a
+node being site-bound) — don't conflate them.
+
 ## Intensity
 
 | Level | What changes |

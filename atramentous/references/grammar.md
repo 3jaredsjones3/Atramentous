@@ -126,11 +126,75 @@ with an existing `docs/scaffolding_register.md` should reuse it. One row per hea
 node:
 
 ```
-| ID | status | location | introduced | gate | risk |
+| ID | status | location | annotate | introduced | gate | risk |
 ```
 
 Inline annotations are distributed memory; the register is the index over them.
 `atra-reconcile` keeps them in sync; `atra-map` reads from both.
+
+### Annotatability — `annotate: inline | external-only`
+
+Atramentous's core mechanism assumes *annotate in place*, but **annotatability is
+a property of the file, not a universal**. Some files cannot or must not hold
+notes. The register records the per-file determination:
+
+| value | meaning |
+|---|---|
+| `annotate: inline` | **default.** Comments belong here; normal Atramentous — notes live at the code site. |
+| `annotate: external-only` | the file cannot or must not hold notes. Its memory goes to the store and the pointer relocates (see the degradation ladder). |
+
+**It is a judgment, decided ONCE and cached in the register — never re-inferred
+per visit.** Two files with identical syntax can differ: a research `.md` welcomes
+notes; a `SKILL.md`, being a *product artifact*, does not — a note there corrupts
+the shipped thing. Syntax alone can't decide it, so the call is made once and
+recorded, not recomputed each time an agent opens the file.
+
+**The rule.** A file is `external-only` when it is a **product artifact**
+(`SKILL.md` and other shipped/consumed outputs), a **generated file** (notes are
+lost on regeneration), or has **no comment syntax** (strict CSV/JSON). Everything
+else defaults to `inline`. (The full annotatability-inference engine and
+access-path resolver are deliberately *not* built yet — this is the recorded
+determination plus the relocation rules it triggers.)
+
+### The degradation ladder
+
+A file gets the **best memory it can support** — the same greedy rule Atramentous
+already runs, continued past the point where "annotate in place" runs out. Always
+take the highest reachable rung:
+
+1. **inline** — the file is `inline`: the note lives at the code site. Full
+   locality; the `L0` pointer/clause is in the file the agent already opened. Best
+   case.
+2. **externalize + relocated pointer** — the file is `external-only` but a good
+   annotatable neighbor exists: the payload goes to `store/<slug>.md`, and the
+   `L0` pointer **moves to the nearest annotatable neighbor on the access path** —
+   the loader that imports the file, the module that reads the generated output;
+   the doorway an agent passes through to reach the silent file, *not* an arbitrary
+   filesystem sibling. (Greedy on proximity-in-access-flow, not in-directory — the
+   one spot naive nearest-neighbor underperforms. The resolver that picks the
+   neighbor is deferred; the rule it will obey is fixed here.)
+3. **externalize, pointer-less** — `external-only` and no annotatable neighbor on
+   the path: the note is recorded in the store with **no summons**. Memory exists
+   but relies on the agent knowing to query — the consultation-rate weak spot.
+   *Assistive memory only.*
+4. **lost** — only if no annotatable surface is reachable anywhere near the file.
+   Should be effectively unreachable; even here it is still a register row, so
+   never truly zero.
+
+**The principle:** never cliff to nothing while any annotatable surface is
+reachable. Every step down is small, so every file — even the worst case — ends up
+with strictly more recorded memory than a vanilla agent leaves: **better than
+vanilla for every file**, the spatial form of "better than vanilla at every point
+in the lifecycle."
+
+**Guardrail asymmetry (hard invariant).** A guardrail (`SAFETY` / `SPINE` or a
+`do-not:`) about an `external-only` file **must** reach rung 2 — a relocated
+pointer carrying its summons onto an annotatable neighbor. It may **not** degrade
+to rung 3 (pointer-less): a guardrail with no summons is a protection that
+silently stopped protecting. If no annotatable neighbor exists on the access path,
+that is an **escalation** (the four-part format), never a silent acceptance.
+Assistive notes may fall to rung 3; guardrails may not. `atra-sweep` enforces this
+with the `guardrail-needs-relocation` finding (HIGH).
 
 ## The externalized tier (the store)
 

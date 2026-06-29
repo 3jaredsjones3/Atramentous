@@ -27,6 +27,11 @@ What it detects:
                                   GUARDRAIL node — its safety rationale vanished. A
                                   broken store-pointer on a plain node stays an
                                   ordinary unresolved-link.)
+  - guardrail-needs-relocation   (HIGH: a register row that is a GUARDRAIL about an
+                                  `external-only` file with no relocated [[store:]]
+                                  summons on an annotatable neighbor. Assistive
+                                  external-only rows may degrade pointer-less; guard
+                                  rows may not.)
 
 Staleness is measured in DEVELOPMENT, not calendar time: the unit is commits in
 the plan's neighborhood since it was written, not days. A plan is stale when the
@@ -167,6 +172,26 @@ def register_ids(reg_path):
     return ids
 
 
+def register_rows(reg_path):
+    """Like register_ids but keeps every cell, for richer per-row checks (e.g.
+    annotatability + relocation). Additive; register_ids is unchanged."""
+    if not reg_path:
+        return []
+    rows = []
+    for ln in reg_path.read_text(errors="ignore").splitlines():
+        cells = [c.strip() for c in ln.split("|") if c.strip()]
+        if cells and cells[0].lower() not in ("id", ":--", "---") and not set(cells[0]) <= {"-", ":"}:
+            rows.append(cells)
+    return rows
+
+
+def is_guardrail(status, fields):
+    """The guardrail predicate — SAFETY/SPINE status OR a do-not: field. ONE
+    definition, reused by both inline nodes (extract_nodes) and register rows so the
+    two can never diverge. Do not redefine 'guardrail' anywhere else."""
+    return status in ("SAFETY", "SPINE") or "do-not" in fields
+
+
 def build_index(root):
     """resolvable link targets: file stems, md headings, register ids, store slugs."""
     targets = set()
@@ -246,7 +271,7 @@ def extract_nodes(lines):
                 if lj.lstrip().startswith(("//", "#", "--", "*", "<!--")):
                     j += 1; continue
                 break
-            guard = status in ("SAFETY", "SPINE") or "do-not" in fields
+            guard = is_guardrail(status, fields)
             nodes.append(dict(start=i + 1, kind="block", status=status, fields=fields,
                               guard=guard, pointer=False, nlines=j - i, gate_link=gate_link,
                               local_only=local_only, label=block_label(status, lines[i:j])))
@@ -479,6 +504,36 @@ def scan(root, age_commits, decision_commits, future_age_commits,
             findings.append(dict(kind="register-orphan", sev="med",
                                  loc=str(os.path.relpath(reg_path, root)),
                                  detail=f"register row '{rid}' referenced by no [[link]]"))
+
+    # guardrail-needs-relocation: a guardrail about an `external-only` file MUST keep
+    # a summons — a relocated [[store:<slug>]] pointer on an annotatable neighbor. It
+    # may NOT degrade to pointer-less (rung 3). Register-driven and structural: the
+    # annotatability judgment is the cached register row, not re-inferred from the
+    # file (so example blocks inside an external-only doc never trip this). Assistive
+    # external-only rows may degrade — only guardrail rows fire. Derived, not stored.
+    for cells in register_rows(reg_path):
+        low = [c.lower() for c in cells]
+        if not any("external-only" in c for c in low):
+            continue
+        status = cells[1].upper() if len(cells) > 1 else ""
+        fields = {"do-not"} if any("do-not" in c for c in low) else set()
+        if not is_guardrail(status, fields):
+            continue  # assistive external-only may degrade to pointer-less — no fire
+        # relocation target: a store:<slug> recorded in the row …
+        slug = None
+        for c in cells:
+            m = re.match(r"store:(\S+)$", c, re.I)
+            if m:
+                slug = m.group(1).lower()
+                break
+        # … with a live inline [[store:<slug>]] summons somewhere annotatable.
+        relocated = slug is not None and f"store:{slug}" in referenced
+        if not relocated:
+            findings.append(dict(kind="guardrail-needs-relocation", sev="high",
+                                 loc=str(os.path.relpath(reg_path, root)),
+                                 detail=f"external-only guardrail '{cells[0]}' has no relocated "
+                                        f"[[store:]] summons on an annotatable neighbor — a "
+                                        f"guardrail with no summons silently stopped protecting"))
     return findings
 
 
@@ -626,7 +681,17 @@ def selftest():
             "fun dorm() {}\n")
         (root / "docs" / "atramentous").mkdir(parents=True)
         (root / "docs" / "atramentous" / "register.md").write_text(
-            "| ID | status |\n|---|---|\n| GhostRow | SCAFFOLD |\n")
+            "| ID | status | location | annotate |\n"
+            "|---|---|---|---|\n"
+            "| GhostRow | SCAFFOLD | zoneA/a.kt | inline |\n"
+            "| ExtGuardUnreloc | SAFETY | data/secrets.csv | external-only |\n"   # guardrail, no relocation -> fires
+            "| ExtGuardReloc | SAFETY | store:reloc-guard | external-only |\n"      # relocated (pointer below) -> no fire
+            "| ExtAssist | REFERENCE | data/notes.csv | external-only |\n")         # assistive external-only -> no fire
+        # the relocated summons for ExtGuardReloc, on an annotatable neighbor:
+        (root / "zoneReloc").mkdir()
+        (root / "zoneReloc" / "loader.kt").write_text(
+            "// atra: see [[store:reloc-guard]] — guards the external-only config; do not bypass\n"
+            "fun loadConfig() {}\n")
 
         # --- density-tier fixtures (no growth; over-density is budget, not age) ---
         (root / "anchor.kt").write_text("fun anchor() {}\n")  # resolves [[anchor]]
@@ -660,6 +725,10 @@ def selftest():
         (root / "docs" / "atramentous" / "store" / "existing-note.md").write_text(
             "---\nid: existing-note\ntitle: A real store note\nstatus: REFERENCE\n---\n\n"
             "why: exists so a [[store:existing-note]] pointer resolves in the selftest.\n")
+        # the externalized payload of the relocated guardrail (ExtGuardReloc):
+        (root / "docs" / "atramentous" / "store" / "reloc-guard.md").write_text(
+            "---\nid: reloc-guard\ntitle: Atomic-config guardrail\nstatus: SAFETY\n---\n\n"
+            "do-not: bypass the config loader's validation; it guards an external-only file.\n")
         (root / "zonePtr").mkdir()
         (root / "zonePtr" / "p.kt").write_text(
             "// atra: see [[store:existing-note]] — losing this breaks the parity check\n"
@@ -771,6 +840,19 @@ def selftest():
             "broken store-pointer on a plain node must stay ordinary unresolved-link"
         assert not any(x["kind"] == "broken-guardrail-pointer" and "ghost-note" in x["detail"]
                        for x in f), "plain broken store-pointer wrongly escalated to guardrail kind"
+
+        # --- guardrail relocation for external-only files (register-driven) ---
+        gnr = [x for x in f if x["kind"] == "guardrail-needs-relocation"]
+        # (1) external-only guardrail with NO relocated pointer -> HIGH:
+        assert any("ExtGuardUnreloc" in x["detail"] for x in gnr), \
+            "missed external-only guardrail with no relocated summons"
+        assert all(x["sev"] == "high" for x in gnr), "guardrail-needs-relocation must be high sev"
+        # (2) same guardrail WITH a relocated [[store:]] pointer -> does NOT fire:
+        assert not any("ExtGuardReloc" in x["detail"] for x in gnr), \
+            "relocated external-only guardrail wrongly flagged"
+        # (3) external-only ASSISTIVE node with no pointer -> does NOT fire:
+        assert not any("ExtAssist" in x["detail"] for x in gnr), \
+            "assistive external-only wrongly flagged (only guardrails must relocate)"
 
         print("selftest ok:", sorted(kinds))
         return 0
