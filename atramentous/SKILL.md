@@ -118,6 +118,7 @@ Field set (include only fields that pass the litmus test — never all of them b
 | `risk:` | what breaks if forgotten or kept too long | scaffold, decision |
 | `do-not:` | the guardrail a future agent might trip | spine, safety |
 | `invariant:` | the general rule the `do-not:` protects — the principle its forbidden actions are instances of. Always pair it with a `do-not:` so a literal reader can't slip through the gap between the listed instances (e.g. `do-not: sort by orderHint or created_at` → `invariant: the active path is defined solely by the parent-walk; no field-based ordering is valid`) | any node with a `do-not:` |
+| `enforced-by:` | `[[test:...]]` link to a test that mechanically fails when the guardrail's invariant is violated — it binds whether or not the agent read the comment, because prose can be read past but a failing test can't. Recommended for *critical* SAFETY/SPINE guardrails, not required. The link is a forward-reference (the test may not exist yet) | critical SAFETY / SPINE guardrails (optional) |
 | `default:` | the provisional answer in effect now, so a deferred consultation never blocks | consult |
 | `ask:` | the one judgment/feel/intent question to put to the human when the gate's phase arrives | consult |
 | `local-only:` | `true` = site-bound memory, never externalized to the store (a port of a `<private>` tag). A second exclusion from `should-externalize`; still budget-counted, and *not* a guardrail | any node whose rationale only makes sense in place |

@@ -76,7 +76,7 @@ STATUS = re.compile(r"\bATRAMENTOUS\b[^\n]*?\b(SPINE|SCAFFOLD|EXPERIMENT|REFEREN
                     r"PRODUCTION|DEPRECATED|REMOVABLE|DECISION|SAFETY|CONSULT)\b")
 OPEN_STATUSES = {"SCAFFOLD", "EXPERIMENT", "DECISION"}
 FIELD = re.compile(r"^\s*(?://|#|--|<!--)?\s*(why|related|future|gate|promote-when|unless|"
-                   r"risk|do-not|status|default|ask|local-only|invariant)\s*:\s*(.*)$", re.I)
+                   r"risk|do-not|status|default|ask|local-only|invariant|enforced-by)\s*:\s*(.*)$", re.I)
 # link prefixes that imply a concrete artifact (so an unresolved one is higher signal)
 CONCRETE_PREFIX = re.compile(r"^\s*(TEST|ADR-|M\d|SPINE|SAFETY|SCAFFOLD)\b")
 # externalization pointer: `[[store:<slug>]]` points at docs/atramentous/store/<slug>.md
@@ -795,6 +795,16 @@ def selftest():
             "// why: same hazard, rule left implicit\n"
             "// do-not: sort by orderHint or created_at\n"   # no invariant: -> fires
             "fun gapGuard() {}\n")
+        # enforced-by [[test:...]] is a FORWARD-REFERENCE: unresolved -> ordinary
+        # unresolved-link, never a high-sev broken-guardrail-pointer (not a store: link).
+        (root / "zoneEnf").mkdir()
+        (root / "zoneEnf" / "ef.kt").write_text(
+            "// ATRAMENTOUS SAFETY\n"
+            "// why: the active path is the parent-walk\n"
+            "// do-not: sort the active path by any field\n"
+            "// invariant: active path is defined solely by the parent-walk\n"
+            "// enforced-by: [[test:active-path-branch-purity]]\n"   # test may not exist yet
+            "fun enforced() {}\n")
 
         git("add", "-A"); git("commit", "-qm", "seed")
 
@@ -895,6 +905,14 @@ def selftest():
         # the do-not WITH an invariant does not (zoneInv has 2 blocks; only gapGuard fires):
         assert len([x for x in dni if "zoneInv" in x["loc"]]) == 1, \
             "a do-not WITH an invariant must NOT flag"
+
+        # --- enforced-by [[test:...]] forward-reference (ordinary link, not high-sev) ---
+        # unresolved enforced-by test link is an ordinary unresolved-link …
+        assert any(x["kind"] == "unresolved-link" and "active-path-branch-purity" in x["detail"]
+                   for x in f), "enforced-by test link should be an ordinary unresolved-link"
+        # … and NEVER escalated to broken-guardrail-pointer, even on a guardrail line:
+        assert not any(x["kind"] == "broken-guardrail-pointer" and "active-path-branch-purity" in x["detail"]
+                       for x in f), "enforced-by test forward-ref wrongly escalated to broken-guardrail-pointer"
 
         print("selftest ok:", sorted(kinds))
         return 0

@@ -75,6 +75,7 @@ flags it (`consult-gateless`).
 | `risk:` | what breaks if forgotten or retained too long | SCAFFOLD, DECISION |
 | `do-not:` | guardrail a future agent might trip | SPINE, SAFETY |
 | `invariant:` | the **general rule** the `do-not:` protects — the principle of which the forbidden actions are *instances*. State it alongside any `do-not:`, so a literal reader can't fall through the gap between the listed instances | any node with a `do-not:` |
+| `enforced-by:` | `[[test:...]]` link to a test that **mechanically fails** when the guardrail's invariant is violated — binds whether or not the agent read the comment. *Recommended* for critical SAFETY/SPINE guardrails; not required | critical SAFETY / SPINE guardrails (optional) |
 | `default:` | the provisional decision in effect *now*, so a deferred consultation never blocks | CONSULT |
 | `ask:` | the single judgment/feel/intent question to put to the human when the gate's phase arrives | CONSULT |
 | `local-only:` | `true` marks a node as **site-bound** — meaningless away from this exact code location, so it is never externalized to the store (the port of a `<private>` tag). A second, independent exclusion from externalization; it does *not* make the node a guardrail | any externalizable node whose rationale only makes sense in place |
@@ -114,6 +115,28 @@ invariant: the active path is defined SOLELY by the parent-walk; NO field-based
            ordering is valid
 ```
 
+### Bind the critical ones with a test — `enforced-by:`
+
+Even a well-worded guardrail is **prose the model can read past** — an observed
+failure: a weak model ignored a clear inline guardrail. Prose persuades; it does
+not bind. A test in the execution path *binds*: it fails when the invariant is
+violated, regardless of whether the agent read the comment. So the strongest
+guardrails name the test that enforces them:
+
+```
+// ATRAMENTOUS  SAFETY
+// do-not:      sort the active path by any field
+// invariant:   the active path is defined solely by the parent-walk
+// enforced-by: [[test:active-path-branch-purity]]
+```
+
+`enforced-by:` is **recommended for critical SAFETY/SPINE guardrails, not
+required** — not every guardrail has or needs a test, and a comment is still
+better than nothing. The `[[test:...]]` link is a *forward-reference* like
+`future:`: the test may not exist yet, so an unresolved one is an ordinary link,
+not a defect. The point is the asymmetry: for the invariants whose violation is a
+hazard, don't rely on the model choosing to honor a comment — bind it.
+
 ## Links
 
 Obsidian-style `[[Stable Name]]`. Conventions:
@@ -121,6 +144,7 @@ Obsidian-style `[[Stable Name]]`. Conventions:
 - Milestones: `[[M14 Vulkan Renderer]]`
 - ADRs / decisions: `[[ADR-0003 Renderer Abstraction]]`
 - Tests: `[[TEST RendererParityTests]]`
+- Enforcing tests (for `enforced-by:`): `[[test:active-path-branch-purity]]` — the test that mechanically catches a guardrail violation; a forward-reference, may not exist yet
 - Spine systems: `[[SPINE Command Bus]]`
 - Safety paths: `[[SAFETY Atomic Save]]`
 - Scaffolds: `[[SCAFFOLD DebugBitmapCanvasRenderer]]`
