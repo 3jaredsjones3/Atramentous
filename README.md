@@ -125,6 +125,21 @@ Guardrails (`SAFETY`/`SPINE` or any `do-not:` node) are never moved, budgeted, o
 suppressed — safety memory always stays inline. Every threshold is a flag whose
 default is a *reasoned default — tune with use, not empirically derived*.
 
+## Packaging
+
+Each skill installs as a self-contained directory. For distribution, the
+per-skill `collection/<skill>.zip` bundles are **build artifacts, not source** —
+they are git-ignored and regenerated from the source tree on release:
+
+```
+scripts/build-collection.sh   # zips every */SKILL.md directory into collection/
+```
+
+The source tree is the only source of truth. The zips are never committed,
+because a committed bundle silently goes stale the moment the source moves on
+(an earlier build shipped an out-of-date linter inside `atra-sweep.zip` exactly
+this way). Build on release; never check the output in.
+
 ## Optional
 
 A tiny `atra-help` reference-card skill is easy to add if you want

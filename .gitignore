@@ -1,0 +1,8 @@
+# Build artifacts — never commit. Regenerate on release with
+# scripts/build-collection.sh. Committing these is what caused stale
+# duplicate-linter drift; the source tree is the only source of truth.
+collection/
+
+# Python
+__pycache__/
+*.pyc
