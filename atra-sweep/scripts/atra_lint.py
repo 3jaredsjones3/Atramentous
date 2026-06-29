@@ -23,6 +23,10 @@ What it detects:
                                   → move its payload to the store, leave a pointer)
   - consult-gateless             (a CONSULT node — a decision deferred to a human —
                                   whose gate names no [[phase]]; "later means never")
+  - do-not-needs-invariant       (a node with a do-not: but no invariant: — state the
+                                  general rule, not just the forbidden instances.
+                                  Structural: field presence/absence only, never a
+                                  judgment of invariant quality.)
   - broken-guardrail-pointer     (HIGH: a broken [[store:<slug>]] pointer sitting on a
                                   GUARDRAIL node — its safety rationale vanished. A
                                   broken store-pointer on a plain node stays an
@@ -72,7 +76,7 @@ STATUS = re.compile(r"\bATRAMENTOUS\b[^\n]*?\b(SPINE|SCAFFOLD|EXPERIMENT|REFEREN
                     r"PRODUCTION|DEPRECATED|REMOVABLE|DECISION|SAFETY|CONSULT)\b")
 OPEN_STATUSES = {"SCAFFOLD", "EXPERIMENT", "DECISION"}
 FIELD = re.compile(r"^\s*(?://|#|--|<!--)?\s*(why|related|future|gate|promote-when|unless|"
-                   r"risk|do-not|status|default|ask|local-only)\s*:\s*(.*)$", re.I)
+                   r"risk|do-not|status|default|ask|local-only|invariant)\s*:\s*(.*)$", re.I)
 # link prefixes that imply a concrete artifact (so an unresolved one is higher signal)
 CONCRETE_PREFIX = re.compile(r"^\s*(TEST|ADR-|M\d|SPINE|SAFETY|SCAFFOLD)\b")
 # externalization pointer: `[[store:<slug>]]` points at docs/atramentous/store/<slug>.md
@@ -396,6 +400,23 @@ def collab_findings(rel, nodes):
     return out
 
 
+def invariant_findings(rel, nodes):
+    """do-not-needs-invariant: a node carries a `do-not:` but no `invariant:`.
+    PURELY STRUCTURAL — presence/absence of the field, nothing else. It does NOT
+    judge whether the do-not 'enumerates instances', nor whether the invariant is
+    well-stated or complete; no deterministic check can, so the linter must not try.
+    The grammar carries the quality fix (forcing the author to state the general
+    rule); the linter only flags the field's absence."""
+    out = []
+    for nd in nodes:
+        if "do-not" in nd["fields"] and "invariant" not in nd["fields"]:
+            out.append(dict(kind="do-not-needs-invariant", sev="med",
+                            loc=f"{rel}:{nd['start']}",
+                            detail="do-not: present without invariant: — state the general rule "
+                                   "it protects, not just the forbidden instances"))
+    return out
+
+
 def scan(root, age_commits, decision_commits, future_age_commits,
          max_per_func=1, node_line_ratio=25, density_floor=1,
          externalize_threshold=40, heavy_node_lines=4):
@@ -494,6 +515,7 @@ def scan(root, age_commits, decision_commits, future_age_commits,
         findings += density_findings(rel, lines, nodes, max_per_func,
                                      node_line_ratio, density_floor)
         findings += collab_findings(rel, nodes)   # structural, git-independent
+        findings += invariant_findings(rel, nodes)  # structural: do-not without invariant
         if git:
             findings += externalize_findings(rel, hood, nodes, meta, root,
                                              externalize_threshold, heavy_node_lines)
@@ -761,6 +783,18 @@ def selftest():
             "// do-not: write in place; read the store note before touching this\n"
             "// related: [[store:atomic-save-rationale]]\n"   # note does NOT exist -> broken
             "fun guardedSave() {}\n")
+        # do-not-needs-invariant: a do-not WITH an invariant is silent; one WITHOUT fires.
+        (root / "zoneInv").mkdir()
+        (root / "zoneInv" / "iv.kt").write_text(
+            "// ATRAMENTOUS SAFETY\n"
+            "// why: the active path is the parent-walk\n"
+            "// do-not: sort by orderHint or created_at\n"
+            "// invariant: active path is defined solely by the parent-walk; no field ordering\n"
+            "fun goodGuard() {}\n"
+            "// ATRAMENTOUS SAFETY\n"
+            "// why: same hazard, rule left implicit\n"
+            "// do-not: sort by orderHint or created_at\n"   # no invariant: -> fires
+            "fun gapGuard() {}\n")
 
         git("add", "-A"); git("commit", "-qm", "seed")
 
@@ -853,6 +887,14 @@ def selftest():
         # (3) external-only ASSISTIVE node with no pointer -> does NOT fire:
         assert not any("ExtAssist" in x["detail"] for x in gnr), \
             "assistive external-only wrongly flagged (only guardrails must relocate)"
+
+        # --- do-not-needs-invariant (structural: field presence/absence only) ---
+        dni = [x for x in f if x["kind"] == "do-not-needs-invariant"]
+        # the do-not WITHOUT an invariant fires:
+        assert any("zoneInv" in x["loc"] for x in dni), "missed do-not without invariant"
+        # the do-not WITH an invariant does not (zoneInv has 2 blocks; only gapGuard fires):
+        assert len([x for x in dni if "zoneInv" in x["loc"]]) == 1, \
+            "a do-not WITH an invariant must NOT flag"
 
         print("selftest ok:", sorted(kinds))
         return 0

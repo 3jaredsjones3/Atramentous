@@ -54,6 +54,7 @@ Heavy block (spine / scaffold / decision / safety only):
 // gate:    [[TEST RendererParityTests]] green for every brush family
 // risk:    diverges from the real renderer silently if retained past M14
 // do-not:  add product-only behavior here
+// invariant: this path is a debug/parity oracle only — nothing here ships to users
 ```
 
 `grep -rn ATRAMENTOUS` finds every node. Grep locates the node; the node carries

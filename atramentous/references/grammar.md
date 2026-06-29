@@ -74,19 +74,45 @@ flags it (`consult-gateless`).
 | `gate:` / `promote-when:` | testable condition that advances the lifecycle | SCAFFOLD, EXPERIMENT |
 | `risk:` | what breaks if forgotten or retained too long | SCAFFOLD, DECISION |
 | `do-not:` | guardrail a future agent might trip | SPINE, SAFETY |
+| `invariant:` | the **general rule** the `do-not:` protects — the principle of which the forbidden actions are *instances*. State it alongside any `do-not:`, so a literal reader can't fall through the gap between the listed instances | any node with a `do-not:` |
 | `default:` | the provisional decision in effect *now*, so a deferred consultation never blocks | CONSULT |
 | `ask:` | the single judgment/feel/intent question to put to the human when the gate's phase arrives | CONSULT |
 | `local-only:` | `true` marks a node as **site-bound** — meaningless away from this exact code location, so it is never externalized to the store (the port of a `<private>` tag). A second, independent exclusion from externalization; it does *not* make the node a guardrail | any externalizable node whose rationale only makes sense in place |
 
 ### Required-field contract by node type
 
-- SPINE → `why` + `do-not`
+- SPINE → `why` + `do-not` + `invariant`
 - SCAFFOLD → `why` + `future` + `gate` + `risk`
 - EXPERIMENT → `why` + `gate`
 - DECISION → `why` + rejected alternatives + `risk`
-- SAFETY → `why` + `do-not` + the invariant that must hold
+- SAFETY → `why` + `do-not` + `invariant` (the invariant that must hold)
 - CONSULT → `why` (what makes it not agent-decidable) + `default` (provisional answer in effect) + `gate` (the `[[named phase]]` where it ripens) + `ask` (the one question)
 - Breadcrumb → links (+ optional one-clause why)
+
+### State the invariant, not just the instances
+
+A `do-not:` that **enumerates specific forbidden actions** without stating the
+**general rule** has gaps, and a weak or literal reader falls straight through
+them. This is a real, observed failure: a guardrail listed specific forbidden sort
+fields, an agent sorted by a field *not on the list*, and broke the invariant
+through the gap the enumeration left open.
+
+The fix is at authoring time: whenever you write a `do-not:`, also write the
+`invariant:` it protects — the principle the forbidden actions are merely instances
+of. Forcing yourself to state the general rule is what surfaces the instances you
+forgot to enumerate. The linter flags a `do-not:` with no `invariant:`
+(`do-not-needs-invariant`); it checks only that the field is *present*, never
+whether it is well-stated — that judgment is the author's, not the linter's.
+
+```
+# enumeration (gap-prone): a literal reader sorts by `index` and slips through
+do-not:    sort by orderHint or created_at
+
+# invariant (closes the gap): names the rule, so any field-based ordering is caught
+do-not:    sort by orderHint or created_at
+invariant: the active path is defined SOLELY by the parent-walk; NO field-based
+           ordering is valid
+```
 
 ## Links
 

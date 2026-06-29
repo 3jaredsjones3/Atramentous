@@ -102,6 +102,7 @@ cover it, it earns a block. Most nodes never need a block.
 // gate:    [[TEST RendererParityTests]] green for every brush family
 // risk:    if retained past M14 it diverges from the real renderer silently
 // do-not:  add product-only behavior here; keep it a debug/reference path
+// invariant: this path is a debug/parity oracle only — no behavior that ships to users
 ```
 
 Field set (include only fields that pass the litmus test — never all of them by reflex):
@@ -116,17 +117,18 @@ Field set (include only fields that pass the litmus test — never all of them b
 | `gate:` / `promote-when:` | the testable condition that advances the node's lifecycle | scaffold, experiment |
 | `risk:` | what breaks if forgotten or kept too long | scaffold, decision |
 | `do-not:` | the guardrail a future agent might trip | spine, safety |
+| `invariant:` | the general rule the `do-not:` protects — the principle its forbidden actions are instances of. Always pair it with a `do-not:` so a literal reader can't slip through the gap between the listed instances (e.g. `do-not: sort by orderHint or created_at` → `invariant: the active path is defined solely by the parent-walk; no field-based ordering is valid`) | any node with a `do-not:` |
 | `default:` | the provisional answer in effect now, so a deferred consultation never blocks | consult |
 | `ask:` | the one judgment/feel/intent question to put to the human when the gate's phase arrives | consult |
 | `local-only:` | `true` = site-bound memory, never externalized to the store (a port of a `<private>` tag). A second exclusion from `should-externalize`; still budget-counted, and *not* a guardrail | any node whose rationale only makes sense in place |
 
 ### Required fields by node type
 
-- **SPINE** (don't-bypass architecture): `why` + `do-not`.
+- **SPINE** (don't-bypass architecture): `why` + `do-not` + `invariant`.
 - **SCAFFOLD** (temporary): `why` + `future` + `gate` + `risk`.
 - **EXPERIMENT** (hypothesis): `why` + `gate` (what proves/kills it).
 - **DECISION** (needs human review): `why` + the rejected alternatives + `risk`.
-- **SAFETY** (data-loss / destructive / validation): `why` + `do-not` + the invariant that must hold.
+- **SAFETY** (data-loss / destructive / validation): `why` + `do-not` + `invariant` (the general rule that must hold).
 - **CONSULT** (decision deferred to a human): `why` (what makes it not agent-decidable) + `default` (provisional answer in effect) + `gate` (the `[[named phase]]` where it ripens) + `ask` (the one question).
 - **Breadcrumb** (navigation only): just `atra:` + links.
 
