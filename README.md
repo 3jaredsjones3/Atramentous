@@ -33,6 +33,21 @@ The central habit, asked before every meaningful change:
 The persistent mode is the only one you typically enable by hand. The companions
 match on demand or are invoked by name.
 
+## Repo layout
+
+This repository is named **Atramentous**. The top-level `atramentous/` folder is
+intentionally the installable core skill — also named `atramentous`, the
+persistent mode from the table above — not an accidental duplicate of the repo
+root.
+
+- Every top-level folder with a `SKILL.md` is a shippable skill: `atramentous`,
+  `atra-weave`, `atra-review`, `atra-rehydrate`, `atra-reconcile`, `atra-map`,
+  `atra-sweep`.
+- `collection/` is generated build output (see Packaging below) and is
+  git-ignored — never hand-edit it, regenerate it.
+- `testing-harness/` holds the experiment protocol, toolkit source, and
+  experiment records.
+
 ## The grammar in one screen
 
 One greppable sentinel, a lifecycle status, a few typed fields, stable links.

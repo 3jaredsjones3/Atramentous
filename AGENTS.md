@@ -14,8 +14,13 @@ proof of the thesis — embedded intent survived the handoff.
 
 The memory layer for THIS project lives in:
 - `README.md` — what Atramentous is and the skill map.
-- `atramentous/SKILL.md` + `atramentous/references/grammar.md` — the canonical
-  grammar. **grammar.md is the source of truth for built behavior.**
+- `atramentous/SKILL.md` + `atramentous/references/grammar.md` — canonical
+  skill behavior and the valid grammar fields. **grammar.md is the source of
+  truth for built behavior.**
+- `atramentous/references/behavioral-patterns.md` — worked authoring moves: use
+  it to choose *which move* to make before deciding which grammar fields to
+  fill. It composes the fields grammar.md already defines; it does not define
+  new grammar.
 - `FUTURE.md` — design reasoned-through but NOT yet built (forced-now /
   evidence-gated / the measurement). Don't treat it as shipped behavior.
 - `ATRA-ANNOTATABILITY.md` and other `ATRA-*.md` — standalone design specs.
