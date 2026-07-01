@@ -1,0 +1,161 @@
+Me: "You're in the Atramentous repo. Read AGENTS.md first (house rules: canonical linter
+is atra-sweep/scripts/atra_lint.py, verify against git not the bash mount, self-test
+green after every change, additive only, guardrail predicate reused verbatim).
+Confirm baseline self-test exit 0 before touching anything.
+CONTEXT (why this change): a real test exposed a guardrail failure mode. A do-not
+field enumerated specific forbidden fields ("sort by orderHint or created_at") but
+did NOT state the general invariant — so an agent sorted by `index` (not in the
+list) and broke the invariant through the gap. Enumerating instances instead of
+stating the principle is a recurring guardrail-authoring failure; weak/literal
+readers fall through the gaps. Fix: make the grammar force authors to state the
+invariant, and make the linter flag its absence.
+Two bounded stages, self-test green after each.
+STAGE 1 — grammar: the `invariant:` field (DOCS/GRAMMAR).
+Add an `invariant:` field to the grammar (grammar.md + atramentous/SKILL.md). Define
+it: alongside any do-not:, the author SHOULD state the general rule the prohibition
+protects — the principle of which the forbidden actions are instances. Document the
+rationale with the concrete failure: a do-not that lists specific fields/symbols
+without the invariant has gaps a literal reader exploits; stating the invariant
+forces the author to generalize and surfaces omitted instances. Give one before/after
+example (the enumeration "sort by orderHint or created_at" vs the invariant "the
+active path is defined solely by the parent-walk; NO field-based ordering is valid").
+Add `invariant` to the recognized-fields list.
+GATE: self-test green (docs only). Report the field definition wording.
+STAGE 2 — linter: flag do-not-without-invariant (STRUCTURAL ONLY).
+Add a finding kind `do-not-needs-invariant` (severity: med): fires when a node
+carries a `do-not:` field but NO `invariant:` field.
+CRITICAL SCOPE — keep this STRUCTURAL, do NOT make it semantic:
+- The check is ONLY presence/absence: do-not present AND invariant absent → flag.
+- Do NOT attempt to assess whether the invariant is well-stated, complete, or
+  whether the do-not "enumerates" — no deterministic check can judge that, and the
+  linter must stay mechanical (no LLM, no fuzzy heuristic). The grammar carries the
+  quality fix (forcing authors to write the invariant); the linter only flags the
+  missing field.
+- Guardrail-exempt logic unchanged. Reuse the existing field-parsing; do not
+  redefine how fields are recognized.
+- Additive: new finding kind, new self-test assertions, no existing kind altered.
+Self-test: a node with do-not: AND invariant: does NOT flag; a node with do-not:
+but no invariant: flags do-not-needs-invariant.
+GATE: self-test green with the new assertions. Report the predicate verbatim.
+WHEN DONE: report the instrument — the invariant field wording, the predicate, and
+confirm the linter checks only field-presence, not invariant quality. I'm reviewing
+especially that the linter didn't drift into semantic judgment."
+
+Cowork: "I'll read AGENTS.md and confirm the baseline against git/the real tree (not the bash mount). Loading the Windows shell.AGENTS.md read; house rules absorbed. Baseline confirmed against the **real tree (git/Windows shell, not the bash mount)**: HEAD `5eff8c5`, clean, self-test exit 0 with all 10 kinds.
+
+Noted on the mid-task reinforcement — and I fully agree: `do-not-needs-invariant` will be **field-presence/absence only**. No detection of whether a `do-not` "looks like an enumeration," no judgment of invariant quality. A linter that guesses at quality manufactures false positives and burns trust; the grammar carries the quality fix, the linter only flags the missing field. I'll confirm this explicitly in the report.
+
+Reading the grammar fields section to place Stage 1 precisely.Now Stage 1 — adding the `invariant:` field to the table, the contracts, and the rationale with the before/after example.Now `atramentous/SKILL.md` — the field table and required-field list. Reading the exact text:Stage 1 GATE — self-test (docs only):Stage 1 GATE met. Now Stage 2 — the linter. First, add `invariant` to the recognized fields (reusing the existing field regex):Now the `do-not-needs-invariant` finding — purely structural presence/absence — added next to `collab_findings`:Now the docstring entry and the self-test fixture + assertions:Now the two assertions (the with-invariant node stays silent; the without-invariant node fires):Stage 2 GATE — self-test plus a real-repo sanity check:Stage 2 GATE met: green, 11 kinds. The 2 `do-not-needs-invariant` on the real repo are worth confirming are benign — let me see exactly where they fire:The 2 findings are the docs' own canonical example blocks (README.md:50, SKILL.md:97) — example `SCAFFOLD`/guardrail blocks with a `do-not:` but no `invariant:`. They're structurally correct findings (those examples really lack the field), but it's a dogfooding inconsistency for the grammar to *teach* "pair every do-not with an invariant" while its own examples don't. Fixing the two examples makes the docs self-consistent and drops repo noise to zero for this kind. Reading them:Self-test again plus confirm the repo run is now clean for this kind:Self-test green; the repo now reports **0** `do-not-needs-invariant` (the docs' own examples model the rule they teach). Committing:Committed `b9fcdcc`. Final fresh-checkout verification on the committed HEAD:Both stages done; fresh-checkout self-test green with the new `do-not-needs-invariant` kind. Verified throughout against the **real tree (git + Windows shell)**, per AGENTS.md — the bash mount was not trusted.
+
+Here's the **instrument**.
+
+**`invariant:` field (Stage 1), wording:** *the general rule the `do-not:` protects — the principle of which the forbidden actions are instances. State it alongside any `do-not:`, so a literal reader can't fall through the gap between the listed instances.* Required for SPINE and SAFETY (it formalizes the contract's prior "the invariant that must hold"); recommended on any node with a `do-not:`. The grammar documents the observed failure and carries the before/after example:
+```
+do-not:    sort by orderHint or created_at                       # enumeration — gaps
+invariant: the active path is defined SOLELY by the parent-walk;  # rule — closes them
+           NO field-based ordering is valid
+```
+
+**`do-not-needs-invariant` predicate (Stage 2), verbatim:**
+```python
+for nd in nodes:
+    if "do-not" in nd["fields"] and "invariant" not in nd["fields"]:
+        emit do-not-needs-invariant (sev "med")
+```
+
+**Confirming the thing you flagged for hand-review:** the check is **field presence/absence only**. It reads `do-not` and `invariant` from the existing `nd["fields"]` set (populated by the existing FIELD regex, to which I only added the `invariant` token — no new parsing path). It does **not** inspect the `do-not`'s text, does **not** try to detect whether it "looks like an enumeration," and does **not** judge whether the `invariant` is well-stated, complete, or correct. There is no string analysis of field *contents* anywhere in the predicate — only set membership. The grammar carries the quality fix (forcing the author to write the rule); the linter stays mechanical. I resisted exactly the "be helpful and detect enumerations" temptation you warned about: that's unguessable, would manufacture false positives, and would erode trust in every other finding.
+
+**Self-test cases:** a `SAFETY` block with `do-not:` **and** `invariant:` → silent; an otherwise-identical block with `do-not:` and **no** `invariant:` → fires (asserted exactly once across the two-block fixture, proving the with-invariant block stays silent).
+
+**One in-scope extra:** the two real-repo hits were the docs' *own* canonical example blocks (README.md, SKILL.md) carrying a `do-not` with no `invariant` — structurally correct findings, but a dogfooding inconsistency (teaching a rule the examples broke). I added an `invariant:` to each example, so Atramentous now models the rule it teaches and the repo reports **0** of this kind. Additive only; no existing kind or assertion altered; guardrail predicate untouched.
+
+`b9fcdcc` is committed locally, unpushed (unsigned, as expected per AGENTS.md). Say the word and I'll push."
+
+Me: "Push it to git. Then...
+
+Confirm self-test exit 0.
+CONTEXT: even a well-worded guardrail is prose the model can read past — a real test
+showed a weak model ignore a clear inline guardrail. The strongest guardrails should
+be ENFORCED by a test in the execution path, not just stated in prose. This adds a
+convention linking a guardrail to the test that enforces it, so the most critical
+invariants don't depend on the model choosing to honor a comment.
+One stage (plus its self-test).
+STAGE 1 — the `enforced-by:` field (GRAMMAR + LINTER).
+Grammar (grammar.md + atramentous/SKILL.md): add an `enforced-by:` field that points
+at a test which mechanically catches a violation of the guardrail — e.g.
+`enforced-by: [[test:active-path-branch-purity]]`. Document it: for SAFETY/SPINE
+guardrails protecting a critical invariant, prose can be read past; an enforcing test
+fails when the invariant is violated, which binds regardless of whether the agent
+read the comment. State that `enforced-by:` is RECOMMENDED for critical guardrails,
+not required (not every guardrail has or needs a test).
+Linter: add `enforced-by` to recognized fields. Optionally (your judgment) a LOW-sev
+informational finding `guardrail-unenforced` that notes a SAFETY/SPINE node with no
+enforced-by: — but ONLY if you can make it non-noisy; if most guardrails legitimately
+lack tests, this finding would be pure noise, so if in doubt, DON'T add the finding,
+just add the field. Report which you chose and why.
+HARD CONSTRAINTS: structural only; reuse the guardrail predicate verbatim; additive;
+self-test green; the enforced-by link is a [[test:...]] reference — treat an
+unresolved one as an ordinary link, NOT a high-sev broken pointer (the test may not
+exist yet — this is a forward-reference, like future:).
+GATE: self-test green. Report the field wording and your call on the optional finding.
+WHEN DONE: report the instrument and whether you added the optional finding. Note: do
+NOT retrofit enforced-by onto existing guardrails in this repo yet — that's a separate
+curation pass; this handoff only adds the convention."
+
+Cowork: "Pushing `b9fcdcc` first.Pushed `b9fcdcc` to `origin/main`. Now confirming the baseline self-test against the real tree before the `enforced-by` work.Baseline confirmed against the **real tree** (git/Windows): HEAD `b9fcdcc`, clean, exit 0, 11 kinds.
+
+**My call on the optional finding: I'm NOT adding `guardrail-unenforced` — field only.** By the feature's own definition `enforced-by` is recommended for *critical* guardrails and "not every guardrail has or needs a test," so a finding flagging every SAFETY/SPINE without it would fire on the legitimately-untested majority — pure noise, exactly the trust-eroding anti-pattern flagged last round. Adding the field; skipping the finding.
+
+Stage 1 — grammar. Adding the `enforced-by:` field row, links convention, and doc:Now the rationale paragraph (after the invariant section) plus the `test:` link convention:Adding the `[[test:...]]` convention to the Links list:Now `atramentous/SKILL.md` — the field table row:Now the linter — add `enforced-by` to the recognized fields:Now the self-test fixture and assertions locking the forward-reference behavior (a `[[test:...]]` on a guardrail line is an ordinary link, never a high-sev broken pointer):Stage 1 GATE — self-test plus a real-repo check (no new findings expected from docs):Self-test green; real-repo shows **0** new finding kinds (the +8 `unresolved-link` are the new docs' own `[[test:...]]` example links — correctly *ordinary* forward-refs, not high-sev). No `guardrail-unenforced` added, as decided. Committing:Committed `3ac6957`. Final fresh-checkout verification:Done. `b9fcdcc` is pushed; the new `enforced-by` work is committed as `3ac6957` (fresh-checkout self-test green, exit 0). Verified throughout against the **real tree (git + Windows shell)** per AGENTS.md — the bash mount was not trusted.
+
+Here's the **instrument.**
+
+**`enforced-by:` field wording.** *An `[[test:...]]` link to a test that mechanically fails when the guardrail's invariant is violated — it binds whether or not the agent read the comment, because prose can be read past but a failing test can't. Recommended for critical SAFETY/SPINE guardrails, not required (not every guardrail has or needs a test). The link is a forward-reference (the test may not exist yet).* Worked example added to grammar + SKILL:
+```
+// ATRAMENTOUS  SAFETY
+// do-not:      sort the active path by any field
+// invariant:   the active path is defined solely by the parent-walk
+// enforced-by: [[test:active-path-branch-purity]]
+```
+
+**Linter change.** Exactly one: `enforced-by` added to the recognized-field regex (same parsing path as every other field). No new finding kind.
+
+**Optional finding — NOT added, and why.** `guardrail-unenforced` would flag every SAFETY/SPINE node without an `enforced-by`. But the field is recommended only for *critical* guardrails and most legitimately lack a test, so the finding would fire on the untested majority — pure noise on a correct state, the same trust-eroding anti-pattern you flagged for `do-not-needs-invariant`. The field gives authors the convention; a noisy nag would undercut it. So: field only.
+
+**Safety property locked by self-test.** The handoff's key constraint — an `enforced-by [[test:...]]` is a forward-reference, treated as an *ordinary* link, never a high-sev broken pointer — holds for free: `broken-guardrail-pointer` is gated on `STORE_LINK.match(lk)` (a `store:` link), and a `test:` link doesn't match, so even on a guardrail line it falls to the ordinary `unresolved-link` branch. The new fixture (a SAFETY block with `enforced-by: [[test:active-path-branch-purity]]`) asserts both directions: the test link *is* an ordinary `unresolved-link`, and it is *not* `broken-guardrail-pointer`.
+
+Structural only; guardrail predicate untouched; additive; no existing kind or assertion altered. Per the handoff I did **not** retrofit `enforced-by` onto any existing guardrail — that's the separate curation pass.
+
+`3ac6957` is committed locally, unpushed (unsigned, as expected). Say the word and I'll push."
+
+Me: "Push it"
+
+Cowork: "Pushed. `3ac6957` (the `enforced-by:` field) is now on `origin/main`. The linter's recognized field set grows by one; no new finding kind, unsigned as expected."
+
+Me: "What do you think of these recent changes?"
+
+Cowork: "Honestly? The execution is excellent and the design is good-but-modest — and the most interesting thing about it is a tension it doesn't quite resolve.
+
+The standout is restraint. The linter refuses to make semantic judgments: `do-not-needs-invariant` checks only that a field exists, and you declined `guardrail-unenforced` because it would nag a legitimate majority. Holding that line — "the linter flags structure, the grammar carries quality" — is the hardest discipline in a tool like this and the easiest to rationalize away in the name of being helpful. That it held across three handoffs is the best signal here.
+
+The three changes also form a real ladder of guardrail strength: enumerate instances → state the general invariant → bind it with a test. That's a coherent escalation, not three bolt-ons.
+
+Now the tension I'd actually push on. The failure that motivated all of this was a *reader* problem — a weak model read past a clear guardrail. But two of the three changes are *author* improvements: `invariant` makes the prose more general, and `do-not-needs-invariant` checks the author wrote a field. Better prose is still prose, and a model that reads past a clear guardrail reads past a well-generalized one too. The only change that actually addresses the runtime failure is `enforced-by`, because a failing test binds whether or not the comment was honored. And `enforced-by` is the one piece with *no* enforcement — a recommended convention, a forward-reference nobody checks resolves, passes, or even tests the right thing. So the strongest medicine is the least required, and the most-enforced finding targets the weakest lever. That's a defensible set of choices (you genuinely can't require a test to exist), but be clear-eyed that the system's answer to "models ignore guardrails" is still mostly "write better, and optionally bind it."
+
+Two smaller things I'd watch. First, `invariant` can decay into ceremony: the cheapest way to silence the linter is an invariant line that just paraphrases the do-not, and now you've trained authors to cargo-cult a field. The mitigation is purely cultural. Second, accumulation — this is the third guardrail field in a row, and a guardrail that "needs" why + do-not + invariant + enforced-by (+ relocation when external-only) is getting heavy. Ceremony is exactly what makes people write the block lazily or skip it, which would be self-defeating. Individually each field earns its place; collectively, watch the weight.
+
+And the meta-point I raised before still stands: this is all reasoned-forward from anecdotes onto an unverified foundation. We keep refining guardrail *authoring* while the question of whether agents follow any of this — the battery in FUTURE.md §3 — stays unrun. The quiet vindication is that `enforced-by` is the one move that doesn't depend on that assumption at all. If the battery ever comes back "agents don't reliably honor annotations," `enforced-by` is the part that survives, and the invariant-authoring layer is the part you'd have to justify on weaker grounds. I'd run the battery before adding a fourth field."
+
+Me: "How would you resolve tensions in these cases?"
+
+Cowork: "Most of them I'd resolve by *not building* — and being honest about why. Only one is a real deferred feature. Here's how I'd take each.
+
+**The strongest lever being least enforced (tension 1) dissolves once you stop conflating layers.** The linter is for the author; the test is for the runtime; prose is for the cooperative reader. The "tension" only exists if you expect a green linter to mean runtime safety. So the resolution is a paragraph, not a feature: state the layering explicitly in the grammar — `do-not` persuades a cooperative reader, `invariant` closes the gaps in that persuasion, `enforced-by` is the only thing that binds an uncooperative one — and say plainly that a clean linter run is *authoring hygiene, not a safety guarantee*. That asymmetry (cheap-and-always-appropriate thing is required; strong-but-not-always-warranted thing is recommended) is actually correct. You can't conjure tests, so requiring the strong lever would just produce fake `enforced-by` links. Document the layering, accept the asymmetry, done.
+
+**The invariant-decaying-into-ceremony tension (3) I'd resolve by explicitly refusing to fix it.** The only check that catches "this invariant just paraphrases the do-not" is semantic, which is the exact thing the project correctly won't build. A lazy generalization is still marginally better than none, and the people writing SAFETY blocks are the ones who care. So the honest resolution is: leave it, and don't pretend a linter could catch it. Writing "we considered a check here and rejected it as unbuildable-deterministically" into the design notes is more valuable than any machinery — it stops a future handoff from re-litigating it.
+
+**The `enforced-by` false-confidence tension (2) is the one real opportunity, and I'd stage it.** The sharp edge is that once a `[[test:...]]` *resolves to a real file*, nothing distinguishes "this guardrail is genuinely bound" from "someone wrote an aspirational link." You can't deterministically check the test *tests the right thing* (semantic — skip). But you can, eventually, check the cheap structural fact: does the named test exist and is it collected by the runner? That needs the repo's test layout — i.e. the same resolver that's already deferred for access-paths — so it's a defer, not a now. The in-spirit move available today is purely *positive and read-only*: when the `[[test:...]]` resolves, surface it in `atra-map`'s safety view as "bound," so the *verified* state is visually distinct from the *claimed* state. No finding, no nag, just making confidence track reality. But I'd gate even that on someone actually using `enforced-by` — otherwise it's a renderer for an empty set.
+
+**Accumulation and the unverified foundation (4 and 5) are the same problem, and I'd resolve them with one move: an evidence gate written into AGENTS.md.** A stop-rule — *no new guardrail-authoring field without (a) a concrete failure the existing fields demonstrably couldn't have prevented, and (b) battery evidence that the authoring layer changes agent behavior at all.* That single rule does double duty: it caps the field creep (every new field now has to clear a real bar, not just a plausible anecdote), and it forces the §3 battery onto the critical path instead of leaving it perpetually "built, not run." The honest reading is that the last three handoffs were each individually justified but collectively built sophistication on an assumption nobody's tested. The gate converts "we keep adding because each addition sounds good" into "we add when we've shown the last addition worked."
+
+So: two paragraphs of grammar/AGENTS honesty (layering + stop-rule), one deliberate non-fix documented as such, and one genuinely useful feature (`enforced-by` resolution → map's safety view) deferred behind actual usage. The throughline is that four of the five "fixes" are restraint, and the discipline that made these changes good — refusing semantic checks, refusing noisy findings — is the same discipline that says *the resolution to most of these is to write words, not code, and go run the test you already built.*"

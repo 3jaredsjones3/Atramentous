@@ -6,3 +6,8 @@ collection/
 # Python
 __pycache__/
 *.pyc
+
+# Testing harness — generated/scratch output and archives never committed;
+# source-first layout lives under testing-harness/.
+*.zip
+**/_selftest_work/
