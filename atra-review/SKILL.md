@@ -35,6 +35,15 @@ Tags:
 - `safety:` a destructive / data-loss / validation path with no SAFETY node or
   `do-not` guardrail.
 - `register:` a heavy node (scaffold/experiment/decision) absent from the register.
+- `cluster:` a semantic cluster — a conceptual group with non-local edit
+  consequences — is missing a link. Flag only when a future agent could
+  plausibly edit one member in isolation and damage the others in a way the
+  build system won't catch — not because files are thematically similar or
+  share a folder.
+- `research:` code depends on math/UX/design/research rationale that is not
+  linked. Flag only when a future agent would plausibly "simplify" the code into
+  a generic version because the bespoke reasoning isn't recorded — not merely
+  because the code lacks an explanatory comment.
 - `stale:` existing memory that now contradicts the code (a link to a deleted
   system, a gate that already passed, a "do not until M12" past M12).
 
@@ -55,9 +64,13 @@ abstraction exists, since it could be unclear to future readers."
 
 ✅ `DebugRenderer.kt:L3: stale: gate "after M14 parity" — M14 shipped. Promote to REMOVABLE or delete.`
 
+✅ `TargetMagnetism.kt:L18: cluster: tunes aim magnetism alongside input smoothing and reticle easing with no link between the three; a solo edit here can make the feel model inconsistent. Add [[Aim-Assist Feel Model]] related: across the three files, stating the non-local risk.`
+
+✅ `CameraEase.kt:L22: research: bezier easing curve matches the UX perceptual-overshoot study, no link. Add related: [[research/camera-motion-ux.md]] and an invariant preserving the overshoot bound so a future agent doesn't "simplify" it to a stock ease.`
+
 ## Scoring
 
-End with the count that matters: `gaps: <N> (why <a>, link <b>, gate <c>, safety <d>, stale <e>).`
+End with the count that matters: `gaps: <N> (why <a>, link <b>, gate <c>, safety <d>, cluster <e>, research <f>, stale <g>).`
 
 If nothing is missing, say `Memory intact. A fresh agent can resume this.` and stop.
 
@@ -70,5 +83,9 @@ If nothing is missing, say `Memory intact. A fresh agent can resume this.` and s
   If the code already says it, its absence as a comment is correct, not a gap.
   Flagging recoverable facts manufactures the noise the discipline exists to
   prevent.
+- Don't flag `cluster:` or `research:` on vague "these are related" vibes. Only
+  flag when a future agent would plausibly edit one file in isolation and damage
+  the whole, or would replace a bespoke choice with a generic one because the
+  rationale is absent. Thematic similarity alone is not a finding.
 - Lists findings; does not write them. Hand the list to the persistent mode or
   to atra-weave to fill.

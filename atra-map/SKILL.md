@@ -34,7 +34,14 @@ it. Most useful once a repo is large enough that grep-and-read stops scaling.
 | Safety map | every SAFETY path and its invariant + guardrails | SAFETY nodes |
 | Scaffolding map | open scaffolds/experiments, their gates, their risk-if-retained | SCAFFOLD/EXPERIMENT + register |
 | Store map | externalized notes grouped by `status`, each with its `id`/`title`/`links` and the inline pointer site(s) that reference it | store note front-matter + `[[store:]]` pointers |
+| Semantic cluster map | conceptual groups whose members have no import/call-graph edge between them, each with the non-local risk an isolated edit carries | REFERENCE nodes whose `related:` links cross files with no mechanical dependency, paired with `risk:` |
+| Research/design grounding map | code whose shape is grounded in external research/design/math rationale, with the source artifact and the invariant it preserves | REFERENCE nodes with `related:` links to research/notebook/design files, paired with `why:` / `invariant:` / `do-not:` |
 | Link atlas | the raw node→node graph (incl. forward-links to unwritten code) | all links |
+
+The semantic cluster and grounding maps are rendered, not inferred — they group
+only the `related:` edges that already exist and already carry a stated `risk:`
+or `why:`. If two files look like they belong together but no such link exists,
+that is a finding for `atra-review`, not an edge to add here.
 
 3. **Mark the frontier.** Forward-links whose targets don't exist yet are the
    project's planned edge — list them explicitly as "reserved / unwritten" so the

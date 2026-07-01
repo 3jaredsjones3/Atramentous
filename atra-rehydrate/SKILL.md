@@ -40,11 +40,21 @@ agents undo their own past work.
 3. **Walk, don't read everything.** Pick the area you're about to touch. Follow
    its `related:` and `future:` links outward one or two hops. The graph tells you
    what this code depends on and what depends on it — far faster than reading the
-   whole subsystem.
-4. **Recover the three things agents forget**, per area:
+   whole subsystem. Some of those `related:` links won't be dependencies at all —
+   they're semantic-cluster or research-grounding edges pointing at files or
+   research artifacts with no mechanical connection. Follow those too; they mark
+   the conceptual neighborhood the build system can't show you.
+4. **Recover the four things agents forget**, per area:
    - **Why** does this exist the way it does? (look for `why:` and SPINE nodes)
    - **What must I not do?** (look for `do-not:`, SAFETY, "do not until Mxx")
    - **What's mid-flight?** (look for SCAFFOLD gates not yet met)
+   - **What conceptual neighborhood is this part of?** (look for REFERENCE nodes
+     marking a semantic cluster — files with no import between them that share one
+     design idea and where an isolated edit has a stated non-local consequence —
+     or grounding a file's shape in research/design/math rationale that lives
+     outside the code). These are relations the import graph and call graph do
+     not show; missing them is how an agent tunes one cluster member in isolation
+     or "simplifies" bespoke code into a generic version.
 5. **Check for stale memory before trusting it.** A gate that already passed, a
    link to a deleted file, a "future" that shipped — note these; they're
    reconcile work, and they mean the memory is partly out of date. Trust the code
@@ -60,6 +70,7 @@ Resuming <area>.
   intent:   <why it exists, from the memory layer>
   in-flight: <open scaffolds + their gates>
   guardrails: <do-not / safety nodes that bound my edits>
+  semantic: <clusters / research grounding to keep in view>
   decisions: <DECISION nodes needing your input, if any>
   stale:    <memory that contradicts the code, if any>
 Proceeding unless you redirect.

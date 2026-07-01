@@ -32,10 +32,25 @@ user points at.
    pays off later. If the work assumes a future system, reserve the connection
    now with a `future:` `[[...]]` link even though the target doesn't exist. When
    that work arrives it lands pre-wired.
-4. **Reciprocate where cheap.** If you link A→B and B is a node you can reach,
+4. **Semantic clusters and research grounding — links mechanical tools can't find.**
+   Ask two questions the import graph and call graph cannot answer:
+   - Does this work belong to a **semantic cluster** — several files that implement
+     one conceptual model with no import between them?
+   - Is this work **grounded in research/design/math** reasoning that lives outside
+     the code — a derivation, a UX study, a design decision?
+   Do not write "link related files." That earns nothing. A cluster or grounding
+   edge earns its place only when **editing one member in isolation would have a
+   non-local consequence the build system can't see**, or when **research/math/UX/
+   design rationale would otherwise be lost**. If neither is true, skip the link —
+   thematic similarity alone is not a reason to connect two files.
+   When it is true, add `related:` links across the cluster (or to the research
+   artifact) and state the earned consequence — the non-local risk in `risk:`, or
+   the preserved rationale in `why:`/`invariant:`. The stated consequence is what
+   distinguishes a real cluster edge from decoration.
+5. **Reciprocate where cheap.** If you link A→B and B is a node you can reach,
    add the B→A breadcrumb so the graph is navigable from both ends. Skip if B is
    large or unrelated-at-the-seam — don't spam.
-5. **Register the heavy ones.** Any link that introduces or points at a SCAFFOLD,
+6. **Register the heavy ones.** Any link that introduces or points at a SCAFFOLD,
    EXPERIMENT, or DECISION gets a register row.
 
 ## Form
@@ -55,6 +70,20 @@ Heavy only when the connection itself needs explaining:
 // future:  [[GPU Brush Engine]] must match this before [[CPU Rasterizer]] is removed
 ```
 
+A semantic cluster or research-grounding edge is always heavy — it must carry the
+consequence that earned it, not just the link:
+
+```ts
+// ATRAMENTOUS REFERENCE [[Aim-Assist Feel Model]]
+// why:     input smoothing, target magnetism, and reticle easing implement ONE UX
+//          feel model, even though they live in separate systems and don't import
+//          each other.
+// related: [[src/input/smoothing.ts]] [[src/combat/target-magnetism.ts]]
+// related: [[src/ui/reticle-ease.ts]]
+// risk:    tuning one file alone can improve a local metric while breaking the
+//          whole feel model — reason about the cluster together, not singly.
+```
+
 ## Naming
 
 Coin a `[[Stable Name]]` only after grepping for an existing one. A new name for
@@ -71,4 +100,9 @@ agent would search for, not the one that's shortest to type.
 - Forward-links to unwritten code are encouraged. Forward-links to code that
   *will never exist* are noise — only reserve connections the work actually
   implies.
+- Don't map a semantic cluster that's just vibes. Files being thematically
+  similar, touching the same feature, or living in the same folder is not
+  enough — that is link-spam with extra steps. A cluster edge earns its place
+  only when editing one member in isolation has a stated non-local consequence
+  the build system can't see. No stated consequence, no edge.
 - Does not refactor code. Adds edges to the graph and register rows; nothing else.
