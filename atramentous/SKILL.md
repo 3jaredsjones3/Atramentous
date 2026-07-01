@@ -38,6 +38,41 @@ Not "should I add a comment." The test is **regret**: would a fresh agent
 *regret the absence* of this fact? If the code, types, and names already make it
 recoverable, you add nothing. If the reasoning would be lost, you record it.
 
+## Choose the move before the fields
+
+The litmus test tells you *whether* to leave memory. This tells you *what kind*. Before
+writing Atramentous, choose the behavioral move first — start from the effect on a future
+agent, never from the field list. Starting from the fields is how a repo fills with
+decorative nodes; starting from the move is how it stays high-signal.
+
+Ask: what should a future cold-start agent do differently because this node exists?
+
+Atramentous carries intent the codebase will not otherwise preserve: future work, hidden
+hazards, semantic clusters, and research/design rationale that mechanical dependencies do
+not reveal. Use it only when you are doing one of these moves:
+
+**Guide future work**
+1. Leaving unfinished structure someone will resume.
+2. Marking when incomplete work becomes safe to finish.
+3. Linking existing code to future structure.
+
+**Protect hidden constraints**
+4. Preserving a rule that spans files.
+5. Preventing an obvious but wrong local refactor.
+6. Recording a temporary compromise or compatibility promise.
+7. Binding important rationale to enforcement.
+
+**Map non-mechanical meaning**
+8. Giving a cold-start reading path through distributed behavior.
+9. Mapping a semantic cluster where local edits have non-local consequences invisible to
+   the build system (only when editing one member in isolation can damage the whole).
+10. Grounding implementation in research, math, UX, design, or experiment notes that
+    explain why the code is shaped this way.
+
+If no move applies, do not write an Atramentous node — use a normal comment or nothing.
+Pick the move, then fill only the fields it needs. Worked examples for each move are in
+`references/behavioral-patterns.md`.
+
 ## Persistence
 
 ACTIVE EVERY RESPONSE. No drift back to writing memory-less code, and no drift
@@ -364,7 +399,8 @@ wearing politeness; the linter flags it (`consult-gateless`).
 
 Each is independently installable and restates the minimal grammar it needs. The
 full grammar lives in `references/grammar.md`. Platform install notes (Cowork /
-Codex / Claude Code) are in `references/atra-tools.md`.
+Codex / Claude Code) are in `references/atra-tools.md`. Worked examples of the ten
+authoring moves are in `references/behavioral-patterns.md`.
 
 ## The rule
 
